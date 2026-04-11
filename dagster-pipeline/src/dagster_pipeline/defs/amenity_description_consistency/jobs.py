@@ -22,6 +22,7 @@ adc_selection = (
 amenity_desc_consistency_job = dg.define_asset_job(
     name="amenity_desc_consistency_job",
     selection=adc_selection,
+    executor_def=dg.in_process_executor,
     description=(
         "Amenity-description consistency analysis: "
         "Bronze (lk_spots + bt_spot_amenities from GeoSpot) -> "

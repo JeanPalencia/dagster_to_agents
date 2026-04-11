@@ -1,10 +1,12 @@
+import os
 import dagster as dg
 from pathlib import Path
 from typing import Any
 
 
-# Configuration
-STORAGE_DIR = Path("/home/ubuntu/dagster/dagster-pipeline/storage")
+# Configuration — derive from DAGSTER_HOME so it works on Railway and EC2
+_dagster_home = os.environ.get("DAGSTER_HOME", "/home/ubuntu/dagster/dagster-pipeline")
+STORAGE_DIR = Path(_dagster_home) / "storage"
 
 
 def _cleanup_all_storage_files(context: dg.AssetExecutionContext) -> dict:
