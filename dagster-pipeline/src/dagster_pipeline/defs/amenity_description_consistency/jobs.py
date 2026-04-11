@@ -41,7 +41,7 @@ _SENSOR_INTERVAL_SECONDS = 300
 @dg.sensor(
     job=amenity_desc_consistency_job,
     minimum_interval_seconds=_SENSOR_INTERVAL_SECONDS,
-    default_status=dg.DefaultSensorStatus.RUNNING,
+    default_status=dg.DefaultSensorStatus.STOPPED,
     description=(
         "Launches amenity_desc_consistency_job after spot_amenities_job "
         "succeeds, with a 10-minute delay for GeoSpot async load."

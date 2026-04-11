@@ -60,7 +60,8 @@ El código en `shared.py` ya tiene fallback: env var → SSM.
 2. Agregarlos a la instancia `Definitions`
 3. Si el flujo escribe a tablas/S3, usar el prefijo `dagster_agent_` en su publish file
 4. Si el flujo usa secrets de SSM, agregar el fallback de env var en `shared.py` (patrón ya establecido)
-5. Commit + push → Railway redeploy automático
+5. Sensors y schedules del nuevo flujo deben tener `default_status=STOPPED` (ver convención abajo)
+6. Commit + push → Railway redeploy automático
 
 **No usar `load_from_defs_folder`** — carga todos los módulos incluyendo dependencias pesadas
 (catboost, scikit-learn, bigquery) y provoca OOM kill en el container de Railway.
@@ -74,6 +75,20 @@ El in_process_executor corre los steps secuencialmente en el mismo proceso.
 | Flujo | Job | Estado |
 |---|---|---|
 | `amenity_description_consistency` | `amenity_desc_consistency_job` | ✅ Activo |
+
+## Sensores y schedules: siempre STOPPED en Railway
+
+Todos los sensores y schedules deben declararse con `default_status=STOPPED` en este entorno:
+
+```python
+@dg.sensor(
+    job=my_job,
+    default_status=dg.DefaultSensorStatus.STOPPED,   # ← siempre STOPPED
+)
+```
+
+Los jobs se lanzan **manualmente** desde el UI o vía GraphQL. Esto evita ejecuciones
+automáticas no deseadas mientras se desarrollan y prueban flujos de agentes uno a uno.
 
 ## `cleanup_storage`
 
