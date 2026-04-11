@@ -17,11 +17,12 @@ railway.toml               # Config Railway: builder=DOCKERFILE, healthcheck=/he
 
 ## Railway
 
-- **URL pública**: https://dagster-to-agents-production.up.railway.app
-- **Proyecto**: `innovative-kindness`
-- **Servicio**: `dagster-to-agents`
+- **URL pública**: https://dagstertoagents-production.up.railway.app
+- **Proyecto**: `dagster-to-agents` (workspace: `dantes4ur's Projects`, plan Pro)
+- **Project ID**: `585835c9-4bc1-4a69-9a49-1f1ee86683ac`
+- **Servicio**: `dagster_to_agents` (ID: `7f4245b9-df84-427d-acf3-f69213e40695`)
 - **Postgres interno**: `postgres.railway.internal:5432` (solo accesible dentro de Railway)
-- **Vincular CLI**: `railway link` → seleccionar `innovative-kindness` → `production`
+- **Vincular CLI**: `railway link` → seleccionar `dantes4ur's Projects` → `dagster-to-agents` → `production`
 
 ## Convención de nombres para pruebas
 
@@ -96,11 +97,23 @@ El asset `cleanup_storage` (de `defs/maintenance/assets.py`) **siempre debe incl
 `definitions.py` y en la selección de cada job. Limpia los pickles temporales que Dagster
 genera en disco durante la ejecución de assets, evitando que el container llene el storage.
 
+## Patrón de `definitions.py`: instancia directa, no factory
+
+Usar `defs = Definitions(...)` (instancia), **nunca** `def defs(): return Definitions(...)` (factory callable).
+
+El código legacy de producción (EC2) usa el patrón factory (`@repository` o callable), por eso
+`pipeline_asset_error_handling.py` llamaba `defs()` con paréntesis. En este repo usamos el
+patrón moderno (Dagster 1.x): `defs` es una instancia directa y no es callable.
+
+Cualquier módulo que importe `defs` debe tratarlo como objeto: `defs.get_repository_def()`,
+**no** `defs().get_repository_def()`.
+
 ## Archivos clave
 
 | Archivo | Qué hace |
 |---|---|
 | `dagster-pipeline/src/dagster_pipeline/definitions.py` | Registro de flujos activos — editar para agregar flujos |
-| `dagster-pipeline/src/dagster_pipeline/defs/data_lakehouse/shared.py` | Utilidades compartidas: S3, GeoSpot PG, GeoSpot API, SSM fallbacks |
+| `dagster-pipeline/src/dagster_pipeline/defs/data_lakehouse/shared.py` | Utilidades compartidas: S3, GeoSpot PG, GeoSpot API, SSM fallbacks (boto3 lazy) |
+| `dagster-pipeline/src/dagster_pipeline/defs/pipeline_asset_error_handling.py` | Error metadata wrapper — usa `defs.get_repository_def()` (instancia, no callable) |
 | `dagster-pipeline/dagster.yaml` | Config de Dagster: storage en Railway Postgres |
 | `start.sh` | Entrypoint Railway: mapea `DATABASE_URL` → `DAGSTER_PG_*`, arranca daemon + webserver |

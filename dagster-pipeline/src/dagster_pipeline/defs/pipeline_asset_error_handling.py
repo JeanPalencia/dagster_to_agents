@@ -29,7 +29,7 @@ def _load_wrapped_asset_keys() -> frozenset[str]:
         return _wrapped_asset_keys
     from dagster_pipeline.definitions import defs
 
-    repo = defs().get_repository_def()
+    repo = defs.get_repository_def()
     keys: set[str] = set()
     for job_name in _job_names_for_error_metadata():
         job = repo.get_job(job_name)
