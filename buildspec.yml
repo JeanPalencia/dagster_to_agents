@@ -1,0 +1,49 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.10
+    commands:
+      - echo Installing UV package manager...
+      - curl -LsSf https://astral.sh/uv/install.sh | sh
+      - export PATH="$HOME/.cargo/bin:$PATH"
+      - uv --version
+  
+  pre_build:
+    commands:
+      - export PATH="$HOME/.cargo/bin:$PATH"
+      - echo Setting up UV environment...
+      - uv sync --frozen
+  
+  build:
+    commands:
+      - echo Build started on `date`
+      - export PATH="$HOME/.cargo/bin:$PATH"
+      - echo Building the Dagster application...
+      - uv build
+      - echo Build completed on `date`
+  
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Preparing artifacts for deployment...
+      - export PATH="$HOME/.cargo/bin:$PATH"
+      - echo Creating deployment package...
+      - mkdir -p deployment
+      - cp -r src/ deployment/
+      - cp pyproject.toml deployment/
+      - cp -r .venv/ deployment/
+      - cp appspec.yml deployment/
+      - cp -r scripts/ deployment/
+      - echo Deployment package created successfully
+
+artifacts:
+  files:
+    - deployment/**/*
+  discard-paths: no
+
+cache:
+  paths:
+    - '/root/.cargo/**/*'
+    - '/root/.cache/uv/**/*'

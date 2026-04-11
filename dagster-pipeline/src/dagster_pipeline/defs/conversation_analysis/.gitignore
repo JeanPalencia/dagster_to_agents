@@ -1,0 +1,21 @@
+# Environment variables
+.env
+*.env
+
+# Data files
+*.csv
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+

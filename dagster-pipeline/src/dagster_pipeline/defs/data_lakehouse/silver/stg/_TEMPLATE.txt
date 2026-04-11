@@ -1,0 +1,120 @@
+# TEMPLATE: NEW SILVER STG ASSET
+# ==============================
+#
+# Steps:
+# 1. Copy this file and rename it to: stg_s2p_{table}_new.py
+# 2. Replace every {TABLE_NAME} with your logical table name (snake_case)
+# 3. Replace {BRONZE_ASSET} with the upstream bronze asset name (e.g. raw_s2p_users_new)
+# 4. Implement transforms in _transform_s2p_{TABLE_NAME}
+# 5. Save the file
+# 6. Dagster discovers the asset via load_from_defs_folder
+#
+# Example:
+#   Bronze: raw_s2p_users_new
+#   File: stg_s2p_users_new.py
+#   Replacements:
+#     - {TABLE_NAME} → users
+#     - {BRONZE_ASSET} → raw_s2p_users_new
+#
+# Prefer make_silver_stg_asset (see silver/stg/base.py) for simpler cases; this template is a full @dg.asset.
+#
+# Rules:
+# - Keep bronze column names unless gold contract requires a rename
+# - Add calculated columns only when needed
+# - Use case_when() / case_when_conditions() from silver/utils.py
+# - validate_and_clean_silver runs at the end
+#
+# ==============================
+
+import dagster as dg
+import polars as pl
+
+from dagster_pipeline.defs.data_lakehouse.shared import (
+    daily_partitions,
+    build_silver_s3_key,
+    write_polars_to_s3,
+)
+from dagster_pipeline.defs.data_lakehouse.silver.utils import (
+    case_when,
+    case_when_conditions,
+    validate_and_clean_silver,
+    validate_input_bronze,
+    validate_output_silver,
+)
+
+
+def _transform_s2p_{TABLE_NAME}(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Transform bronze {BRONZE_ASSET}; keep original column names.
+    Add derived columns only when needed.
+
+    Args:
+        df: Input from bronze
+
+    Returns:
+        Transformed DataFrame
+    """
+    # Example: case_when
+    # origin_text_expr = case_when(
+    #     "origin",
+    #     {1: "Spot2", 2: "Hubspot"},
+    #     default=None,
+    #     alias="origin_text"
+    # )
+
+    # Example: case_when_conditions
+    # max_type_expr = case_when_conditions(
+    #     [
+    #         (pl.col("type4_at").is_not_null(), "T4"),
+    #         (pl.col("type3_at").is_not_null(), "T3"),
+    #     ],
+    #     default="Others",
+    #     alias="max_type"
+    # )
+
+    # return df.with_columns([origin_text_expr, max_type_expr])
+
+    return df
+
+
+@dg.asset(
+    partitions_def=daily_partitions,
+    group_name="silver",
+    description="Silver STG: {TABLE_NAME} from Spot2 Platform.",
+    io_manager_key="s3_silver",
+)
+def stg_s2p_{TABLE_NAME}_new(
+    context: dg.AssetExecutionContext,
+    {BRONZE_ASSET}: pl.DataFrame,
+) -> pl.DataFrame:
+    """Transform {BRONZE_ASSET}; validations run before/after transform."""
+    input_validation = validate_input_bronze({BRONZE_ASSET}, context)
+
+    if input_validation["is_empty"]:
+        context.log.warning("⚠️  Empty input — returning empty DataFrame")
+        return {BRONZE_ASSET}
+
+    df_transformed = _transform_s2p_{TABLE_NAME}({BRONZE_ASSET})
+
+    context.log.info(
+        f"stg_s2p_{TABLE_NAME}_new: {df_transformed.height} rows for partition {context.partition_key}"
+    )
+
+    output_validation = validate_output_silver(
+        df_transformed,
+        {BRONZE_ASSET},
+        context,
+        allow_row_loss=False,
+    )
+
+    if not output_validation["validation_passed"]:
+        context.log.error(
+            f"❌ Validation failed: {output_validation['rows_lost']:,} rows lost. Check transforms."
+        )
+
+    df_transformed = validate_and_clean_silver(df_transformed, context)
+
+    s3_key = build_silver_s3_key(f"stg_s2p_{TABLE_NAME}_new", file_format="parquet")
+    write_polars_to_s3(df_transformed, s3_key, context, file_format="parquet")
+
+    return df_transformed

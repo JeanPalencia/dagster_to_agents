@@ -1,0 +1,64 @@
+---
+description: Guardian rule que fuerza la actualización de documentación, skills y rules cuando se modifican archivos del pipeline SST. Se activa tanto en Plan mode como en Agent mode.
+globs: dagster-pipeline/src/dagster_pipeline/defs/spot_state_transitions/**
+alwaysApply: false
+---
+
+# SST Guardian — Mantener documentación sincronizada
+
+Cuando CUALQUIER archivo del pipeline `spot_state_transitions/` se modifica o se planea modificar, esta regla es OBLIGATORIA.
+
+## Inventario de documentos acoplados
+
+```
+ARCHIVO MODIFICADO                         DOCUMENTOS A ACTUALIZAR
+──────────────────                         ───────────────────────
+processing.py                          →   [1] README.md (sección 6: Data contracts, sección 8: Columnas)
+  (TRANSITIONS_SCHEMA,                     [2] .cursor/skills/sst-metrics/table-reference.md
+   FINAL_COLUMNS, FINAL_RENAME)            [3] .cursor/skills/sst-metrics/examples.md (si cambian columnas)
+
+bronze/*.py                            →   [1] README.md (secciones 3-5: DAG, assets, lógica)
+silver/*/*.py                              [4] .cursor/rules/sst-pipeline.mdc (flujo resumido)
+gold/*.py
+publish/*.py
+
+jobs.py                                →   [1] README.md (sección 7: Job y schedule)
+                                           [4] .cursor/rules/sst-pipeline.mdc
+
+__init__.py                            →   [1] README.md (sección 2: estructura, __all__)
+
+Cualquier cambio que altere               [5] .cursor/skills/sst-metrics/scripts/validate_metric.py
+columnas de salida de Gold                    (si cambian las columnas que la validación compara)
+```
+
+### Rutas completas
+
+1. `dagster-pipeline/src/dagster_pipeline/defs/spot_state_transitions/README.md`
+2. `.cursor/skills/sst-metrics/table-reference.md`
+3. `.cursor/skills/sst-metrics/examples.md`
+4. `.cursor/rules/sst-pipeline.mdc`
+5. `.cursor/skills/sst-metrics/scripts/validate_metric.py`
+
+## Instrucciones por modo
+
+### En Plan mode
+
+ANTES de finalizar el plan, verificar:
+- Identificar qué archivos del pipeline se van a modificar
+- Consultar el inventario de arriba para determinar qué documentos se ven afectados
+- INCLUIR en el plan tareas explícitas para actualizar cada documento afectado
+- El plan NO se considera completo si omite la actualización de documentación
+
+### En Agent mode (cambio directo)
+
+1. Completar el cambio de código
+2. Validar que el cambio funciona correctamente
+3. ANTES de dar por terminada la tarea, actualizar todos los documentos afectados según el inventario
+4. La tarea NO se considera terminada hasta que todos los docs estén en sync
+
+## Fuente de verdad
+
+El código siempre es la fuente de verdad. Los documentos se derivan del código:
+- `processing.py` define el esquema canónico (TRANSITIONS_SCHEMA, FINAL_COLUMNS, FINAL_RENAME)
+- Los assets `*.py` definen el DAG, las dependencias y la lógica
+- `jobs.py` define el schedule y la selección

@@ -1,0 +1,22 @@
+# Postgres: .env.dagster desde SSM en EC2: /dagster_ops/pg_{host,username,password,database}.
+retention:
+  schedule:
+    purge_after_days: 1
+  sensor:
+    purge_after_days:
+      skipped: 1
+      success: 1
+      failure: 1
+
+storage:
+  postgres:
+    postgres_db:
+      username:
+        env: DAGSTER_PG_USERNAME
+      password:
+        env: DAGSTER_PG_PASSWORD
+      hostname:
+        env: DAGSTER_PG_HOST
+      db_name:
+        env: DAGSTER_PG_DB
+      port: 5432
