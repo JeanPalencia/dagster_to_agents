@@ -206,6 +206,10 @@ uv.lock
 
 .DS_Store
 
+# Claude Code — personal overrides (not committed)
+CLAUDE.local.md
+.claude/settings.local.json
+
 # Cursor project files (local, user-specific by default)
 .cursor/*
 
