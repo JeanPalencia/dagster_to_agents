@@ -350,16 +350,16 @@ def _query_geospot_postgres_to_polars(
     Applies schema overrides to ensure consistent type mapping.
     """
     try:
-        # Get Geospot credentials from SSM
-        host = ssm.get_parameter(
+        # Get Geospot credentials from env vars (Railway/test) or SSM (EC2/prod)
+        host = os.environ.get("GEOSPOT_DB_HOST") or ssm.get_parameter(
             Name="/dagster/lk_conversations_metrics/db_geospot_host",
             WithDecryption=False
         )["Parameter"]["Value"]
-        username = ssm.get_parameter(
+        username = os.environ.get("GEOSPOT_DB_USER") or ssm.get_parameter(
             Name="/dagster/lk_conversations_metrics/db_geospot_user",
             WithDecryption=True
         )["Parameter"]["Value"]
-        password = ssm.get_parameter(
+        password = os.environ.get("GEOSPOT_DB_PASSWORD") or ssm.get_parameter(
             Name="/dagster/lk_conversations_metrics/db_geospot_password",
             WithDecryption=True
         )["Parameter"]["Value"]
@@ -1695,7 +1695,10 @@ def write_polars_to_s3_csv_chunked(
 # ============ Geospot API Helpers ============
 
 def get_geospot_api_key() -> str:
-    """Gets Geospot Lakehouse API key from SSM."""
+    """Gets Geospot Lakehouse API key from env var (Railway/test) or SSM (EC2/prod)."""
+    key = os.environ.get("GEOSPOT_API_KEY")
+    if key:
+        return key
     resp = ssm.get_parameter(
         Name=GEOSPOT_API_KEY_PARAM,
         WithDecryption=True,

@@ -14,7 +14,8 @@ from dagster_pipeline.defs.amenity_description_consistency.shared import (
 
 
 FILE_FORMAT = "csv"
-S3_KEY = f"amenity_description_consistency/gold/rpt_amenity_description_consistency/data.{FILE_FORMAT}"
+TABLE_NAME = "dagster_agent_rpt_amenity_description_consistency"
+S3_KEY = f"dagster_agent_amenity_description_consistency/gold/{TABLE_NAME}/data.{FILE_FORMAT}"
 
 
 @dg.asset(
@@ -60,20 +61,20 @@ def rpt_amenity_desc_consistency_to_geospot(
     """Sends HTTP request to load S3 data into PostgreSQL."""
     result = load_to_geospot(
         s3_key=S3_KEY,
-        table_name="rpt_amenity_description_consistency",
+        table_name=TABLE_NAME,
         mode="replace",
         context=context,
     )
 
     try:
         context.add_output_metadata({
-            "table_name": "rpt_amenity_description_consistency",
+            "table_name": TABLE_NAME,
             "s3_key": S3_KEY,
             "mode": "replace",
         })
     except Exception:
         context.log.info(
-            f"Metadata: table=rpt_amenity_description_consistency, s3_key={S3_KEY}"
+            f"Metadata: table={TABLE_NAME}, s3_key={S3_KEY}"
         )
 
     return result
