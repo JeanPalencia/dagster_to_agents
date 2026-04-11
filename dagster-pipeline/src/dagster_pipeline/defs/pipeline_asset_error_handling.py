@@ -1,10 +1,10 @@
 # defs/pipeline_asset_error_handling.py
 """
-Error metadata (try/except + yield) for assets that participate in jobs resolved by
-_job_names_for_error_metadata() (conv_job, lakehouse_daily_job, and lakehouse _new jobs from
-jobs.LAKEHOUSE_NEW_PIPELINE_JOB_NAMES). Job names are imported lazily to avoid circular imports.
+Error metadata (try/except + yield) for assets that participate in any registered job.
 
-lk_vtl_job is handled separately in its module.
+Asset keys are resolved dynamically from all jobs in the repository — no hardcoded job
+names. This means any new job added to definitions.py is automatically covered without
+touching this file.
 """
 from __future__ import annotations
 
@@ -12,13 +12,6 @@ from collections.abc import Callable, Iterator
 from typing import Any
 
 import dagster as dg
-
-
-def _job_names_for_error_metadata() -> tuple[str, ...]:
-    """Lazy import: jobs module must not be loaded while this package initializes."""
-    from dagster_pipeline.defs.data_lakehouse.jobs import LAKEHOUSE_NEW_PIPELINE_JOB_NAMES
-
-    return ("conv_job", "lakehouse_daily_job", *LAKEHOUSE_NEW_PIPELINE_JOB_NAMES)
 
 _wrapped_asset_keys: frozenset[str] | None = None
 
@@ -31,9 +24,8 @@ def _load_wrapped_asset_keys() -> frozenset[str]:
 
     repo = defs.get_repository_def()
     keys: set[str] = set()
-    for job_name in _job_names_for_error_metadata():
-        job = repo.get_job(job_name)
-        keys.update(n.name for n in job.nodes_in_topological_order)
+    for job_def in repo.get_all_jobs():
+        keys.update(n.name for n in job_def.nodes_in_topological_order)
     _wrapped_asset_keys = frozenset(keys)
     return _wrapped_asset_keys
 
