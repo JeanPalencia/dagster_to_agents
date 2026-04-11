@@ -26,9 +26,25 @@ _s3_config = BotocoreConfig(
     retries={"max_attempts": 4, "mode": "adaptive"},
 )
 
-# AWS Clients
-ssm = boto3.client("ssm", region_name="us-east-1")
-s3 = boto3.client("s3", region_name="us-east-1", config=_s3_config)
+# AWS Clients — lazy initialization to avoid credential errors at import time
+class _LazyBotoClient:
+    """Defers boto3 client creation to first use, avoiding import-time credential checks."""
+    def __init__(self, service: str, **kwargs):
+        self._service = service
+        self._kwargs = kwargs
+        self._client = None
+
+    def _get(self):
+        if self._client is None:
+            self._client = boto3.client(self._service, **self._kwargs)
+        return self._client
+
+    def __getattr__(self, name: str):
+        return getattr(self._get(), name)
+
+
+ssm = _LazyBotoClient("ssm", region_name="us-east-1")
+s3 = _LazyBotoClient("s3", region_name="us-east-1", config=_s3_config)
 
 # Configuration
 ANALYSIS_DB_ENDPOINT = "spot2-production-analysis.c4x5kddqib5v.us-east-1.rds.amazonaws.com"
