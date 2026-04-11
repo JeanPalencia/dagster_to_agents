@@ -65,6 +65,10 @@ El código en `shared.py` ya tiene fallback: env var → SSM.
 **No usar `load_from_defs_folder`** — carga todos los módulos incluyendo dependencias pesadas
 (catboost, scikit-learn, bigquery) y provoca OOM kill en el container de Railway.
 
+**Cada job nuevo debe usar `executor_def=dg.in_process_executor`** — el executor multiprocess
+lanza un subprocess por step en paralelo, multiplicando el uso de memoria y causando OOM kill.
+El in_process_executor corre los steps secuencialmente en el mismo proceso.
+
 ## Flujos activos
 
 | Flujo | Job | Estado |
