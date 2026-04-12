@@ -117,12 +117,7 @@ async def run_agent(user_message: str) -> str:
         )
         response_body = json.loads(response["body"].read())
 
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info("Bedrock response keys: %s", list(response_body.keys()))
-        logger.info("Bedrock response: %s", json.dumps(response_body, indent=2)[:500])
-
-        stop_reason = response_body.get("stopReason")
+        stop_reason = response_body.get("stop_reason")
         content = response_body.get("content", [])
 
         # Collect text content
