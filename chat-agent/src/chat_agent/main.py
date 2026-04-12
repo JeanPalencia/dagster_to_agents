@@ -44,11 +44,12 @@ async def chat_webhook(request: Request) -> JSONResponse:
     REMOVED_FROM_SPACE, CARD_CLICKED) are acknowledged silently.
     """
     body: dict = await request.json()
+    logger.info("Webhook body keys=%s body=%s", list(body.keys()), body)
     event_type: str = body.get("type", "")
 
     # Silently acknowledge non-message events
     if event_type != "MESSAGE":
-        logger.info("Received event type=%s — ignoring", event_type)
+        logger.info("Received event type=%r — ignoring", event_type)
         return JSONResponse({"text": ""})
 
     message = body.get("message", {})
