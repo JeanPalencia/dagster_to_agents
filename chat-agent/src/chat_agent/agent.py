@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from pathlib import Path
 
 from chat_agent.config import DAGSTER_SYSTEM_PROMPT
@@ -46,12 +47,32 @@ async def run_agent(user_message: str, session_id: str | None = None) -> tuple[s
 
     logger.info("Running claude CLI: %s", " ".join(cmd))
 
+    # Build environment for subprocess - inherit current env + Bedrock config
+    env = os.environ.copy()
+    env.update({
+        "CLAUDE_CODE_USE_BEDROCK": "1",
+        "AWS_REGION": os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+        "AWS_DEFAULT_REGION": os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+        # These should already be in os.environ from Railway, but be explicit
+        "AWS_ACCESS_KEY_ID": os.environ.get("AWS_ACCESS_KEY_ID", ""),
+        "AWS_SECRET_ACCESS_KEY": os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
+        "AWS_SESSION_TOKEN": os.environ.get("AWS_SESSION_TOKEN", ""),
+        # Pin model version for Bedrock
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "us.anthropic.claude-sonnet-4-6",
+    })
+
+    logger.info("Subprocess env: CLAUDE_CODE_USE_BEDROCK=%s, AWS_REGION=%s, AWS_ACCESS_KEY_ID=%s",
+                env.get("CLAUDE_CODE_USE_BEDROCK"),
+                env.get("AWS_REGION"),
+                "***" if env.get("AWS_ACCESS_KEY_ID") else "NOT SET")
+
     try:
-        # Run the subprocess
+        # Run the subprocess with explicit env
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
 
         # Wait with timeout
