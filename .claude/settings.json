@@ -4,7 +4,9 @@
       "command": "npx",
       "args": [
         "mcp-remote",
-        "https://mcp.ai.spot2.mx/mcp"
+        "https://mcp.ai.spot2.mx/mcp",
+        "--header",
+        "Authorization: Bearer ${SPOT2_API_KEY}"
       ]
     }
   }
