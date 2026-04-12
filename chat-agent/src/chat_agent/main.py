@@ -39,6 +39,10 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Dagster Chat Agent")
 
+# In-memory session store: {space_name: session_id}
+# Sessions are lost on container restart (acceptable for this use case)
+_sessions: dict[str, str] = {}
+
 
 def _chat_response(text: str) -> dict:
     """Build a Google Workspace Add-on Chat response."""
@@ -75,10 +79,19 @@ async def chat_webhook(request: Request) -> JSONResponse:
         return JSONResponse({})
 
     sender: str = chat_event.get("user", {}).get("displayName", "User")
-    logger.info("Message from %s: %s", sender, user_text)
+    space_name: str = message_payload.get("space", {}).get("name", "")
+    logger.info("Message from %s in space %s: %s", sender, space_name, user_text)
+
+    # Look up existing session for this space
+    session_id = _sessions.get(space_name) if space_name else None
 
     try:
-        reply = await run_agent(user_text)
+        reply, new_session_id = await run_agent(user_text, session_id=session_id)
+
+        # Store the new session ID if we have one
+        if new_session_id and space_name:
+            _sessions[space_name] = new_session_id
+            logger.info("Stored session %s for space %s", new_session_id, space_name)
     except Exception as exc:
         logger.exception("Agent error: %s", exc)
         reply = f"Error procesando tu mensaje: {exc}"
