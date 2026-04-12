@@ -10,13 +10,29 @@ import logging
 import os
 
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+from claude_agent_sdk.types import McpStdioServerConfig
 
 from chat_agent.config import DAGSTER_SYSTEM_PROMPT
-from dagster_mcp.server import dagster_server
+from dagster_mcp.server import DAGSTER_TOOLS, dagster_server
 
 logger = logging.getLogger(__name__)
 
 _MAX_TURNS = 10
+
+# Engram MCP server (persistent memory via stdio)
+_engram_server = McpStdioServerConfig(
+    command="engram",
+    args=["mcp"],
+    env={"ENGRAM_DATA_DIR": os.environ.get("ENGRAM_DATA_DIR", "/data/.engram")},
+)
+
+# Allowed tools: all dagster tools + key engram memory tools
+_DAGSTER_TOOL_NAMES = [f"mcp__dagster__{t.name}" for t in DAGSTER_TOOLS]
+_ENGRAM_TOOL_NAMES = [
+    "mcp__engram__mem_save",
+    "mcp__engram__mem_search",
+    "mcp__engram__mem_context",
+]
 
 
 async def run_agent(user_message: str, session_id: str | None = None) -> tuple[str, str | None]:
@@ -28,23 +44,18 @@ async def run_agent(user_message: str, session_id: str | None = None) -> tuple[s
     """
     options = ClaudeAgentOptions(
         system_prompt=DAGSTER_SYSTEM_PROMPT,
-        mcp_servers={"dagster": dagster_server},
-        allowed_tools=[
-            "mcp__dagster__list_jobs",
-            "mcp__dagster__launch_job",
-            "mcp__dagster__get_run_status",
-            "mcp__dagster__get_recent_runs",
-        ],
+        mcp_servers={"dagster": dagster_server, "engram": _engram_server},
+        allowed_tools=_DAGSTER_TOOL_NAMES + _ENGRAM_TOOL_NAMES,
         permission_mode="bypassPermissions",
         max_turns=_MAX_TURNS,
         resume=session_id,
-        # Pass Bedrock credentials to the bundled CLI subprocess
         env={
             "CLAUDE_CODE_USE_BEDROCK": "1",
             "AWS_ACCESS_KEY_ID": os.environ.get("AWS_ACCESS_KEY_ID", ""),
             "AWS_SECRET_ACCESS_KEY": os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
             "AWS_SESSION_TOKEN": os.environ.get("AWS_SESSION_TOKEN", ""),
             "AWS_DEFAULT_REGION": os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+            "ENGRAM_DATA_DIR": os.environ.get("ENGRAM_DATA_DIR", "/data/.engram"),
         },
     )
 
