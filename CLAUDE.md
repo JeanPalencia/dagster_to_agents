@@ -112,20 +112,28 @@ Cualquier módulo que importe `defs` debe tratarlo como objeto: `defs.get_reposi
 ## chat-agent — Agente Google Chat
 
 Servicio FastAPI independiente desplegado en Railway como segundo servicio del proyecto.
-Recibe mensajes de Google Chat, los procesa con Claude via AWS Bedrock (tool_use), y llama al GraphQL de Dagster.
+Recibe mensajes de Google Chat, los procesa con **Claude Agent SDK** via AWS Bedrock, y llama al GraphQL de Dagster.
 
 ```
 chat-agent/
-    Dockerfile              # python:3.12-slim + uv, expone puerto 8000
+    Dockerfile              # python:3.12-slim + uv, non-root (appuser), expone puerto 8000
     railway.toml            # builder=DOCKERFILE, healthcheck=/health
-    pyproject.toml          # fastapi, uvicorn, boto3, httpx, google-auth
+    pyproject.toml          # fastapi, uvicorn, claude-agent-sdk, httpx, google-auth
     src/chat_agent/
         main.py             # POST /chat/webhook  +  GET /health (formato Google Workspace Add-on)
-        agent.py            # Loop Claude tool_use via Bedrock (claude-sonnet-4-6, max 10 iteraciones)
+        agent.py            # Claude Agent SDK: query() con MCP tools, session tracking por space
         tools.py            # GraphQL: launch_job, get_run_status, get_recent_runs, list_jobs
-        config.py           # Env vars + JOB_REGISTRY
+        config.py           # Env vars + JOB_REGISTRY + DAGSTER_SYSTEM_PROMPT
         google_auth.py      # Verifica JWT de Google Chat con audience = webhook URL
+    src/dagster_mcp/
+        server.py           # Tools de Dagster con @tool decorator (McpSdkServerConfig, in-process)
 ```
+
+### Arquitectura del agente
+
+El agente usa `claude_agent_sdk.query()` con un `McpSdkServerConfig` in-process. Los tools de Dagster corren dentro del mismo proceso Python (no hay servidor stdio separado). El SDK usa el CLI de Claude Code bundled internamente — las credenciales de Bedrock se pasan via `ClaudeAgentOptions(env={...})` porque el subprocess NO hereda las env vars del proceso padre.
+
+Las sesiones se trackean en memoria por `space.name` de Google Chat (se pierden en redeploy — aceptable).
 
 ### Deploy en Railway
 
@@ -135,8 +143,9 @@ chat-agent/
 
 | Variable | Valor |
 |---|---|
-| `AWS_ACCESS_KEY_ID` | Credenciales AWS (mismas que para S3 en dagster_to_agents) |
-| `AWS_SECRET_ACCESS_KEY` | Credenciales AWS (mismas que para S3) |
+| `CLAUDE_CODE_USE_BEDROCK` | `1` |
+| `AWS_ACCESS_KEY_ID` | Credenciales AWS |
+| `AWS_SECRET_ACCESS_KEY` | Credenciales AWS |
 | `AWS_SESSION_TOKEN` | Token STS temporal (si las creds son ASIA*) |
 | `AWS_DEFAULT_REGION` | `us-east-1` |
 | `DAGSTER_GRAPHQL_URL` | `https://dagstertoagents-production.up.railway.app/graphql` |
@@ -144,12 +153,18 @@ chat-agent/
 
 4. Generar dominio público → usar como webhook URL en Google Chat API config
 
+> **⚠️ Credenciales STS (ASIA\*)**: Si `AWS_ACCESS_KEY_ID` empieza con `ASIA`, son temporales y expiran.
+> Síntoma: el agente no responde (el SDK hace retries silenciosos con 403 authentication_failed).
+> Renovar con: `railway variables --set "AWS_ACCESS_KEY_ID=$(aws configure get aws_access_key_id)" --set "AWS_SECRET_ACCESS_KEY=$(aws configure get aws_secret_access_key)" --set "AWS_SESSION_TOKEN=$(aws configure get aws_session_token)"`
+
 **Nota sobre Google Chat JWT**: El app usa formato Google Workspace Add-ons, donde:
 - `aud` en el JWT = URL del webhook (con espacio al final que se stripea)
 - `iss` = `https://accounts.google.com` (no `chat@system.gserviceaccount.com`)
 - El body del evento viene en `body["chat"]["messagePayload"]["message"]["text"]`
 
-**Nota sobre AWS Bedrock**: El modelo se invoca via `bedrock-runtime.invoke_model()` con `us.anthropic.claude-sonnet-4-6`. Todos los content blocks requieren `{"type": "text", "text": "..."}` explícito (system, messages, tool_result). Los campos de respuesta son snake_case (`stop_reason`, no `stopReason`).
+**Nota sobre formato de respuestas**: Google Chat usa `*negrita*` (un asterisco), no `**doble**`. El system prompt en `config.py` ya instruye a Claude con las reglas de formato correctas.
+
+**Nota sobre non-root**: El Dockerfile crea `appuser (uid=1000)` para el runtime. El SDK requiere usuario no-root para poder usar `bypassPermissions`.
 
 ### Agregar un nuevo job al agente
 
