@@ -86,9 +86,11 @@ async def get_recent_runs_tool(args: dict) -> dict:
     return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
 
 
-# Create the MCP server with all 4 tools
+# Add new tools to this list — agent.py derives allowed_tools from it automatically
+DAGSTER_TOOLS = [list_jobs_tool, launch_job_tool, get_run_status_tool, get_recent_runs_tool]
+
 dagster_server = create_sdk_mcp_server(
     name="dagster",
     version="1.0.0",
-    tools=[list_jobs_tool, launch_job_tool, get_run_status_tool, get_recent_runs_tool],
+    tools=DAGSTER_TOOLS,
 )
