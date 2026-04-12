@@ -27,6 +27,8 @@ Response format for Chat add-ons:
 from __future__ import annotations
 
 import logging
+import os
+import pwd
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -38,6 +40,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Dagster Chat Agent")
+
+# Log the user the app is running as (for debugging)
+try:
+    current_user = pwd.getpwuid(os.getuid()).pw_name
+    logger.info("🚀 Chat agent starting as user: %s (uid=%d)", current_user, os.getuid())
+except Exception as e:
+    logger.warning("Could not determine current user: %s", e)
 
 # In-memory session store: {space_name: session_id}
 # Sessions are lost on container restart (acceptable for this use case)
