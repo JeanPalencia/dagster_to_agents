@@ -7,6 +7,10 @@ compiled as regex patterns. Classifies each spot into:
   - Todas mencionadas: description covers all tagged amenities
   - Omision parcial:   description covers some but not all
   - Omision total:     description covers none of the tagged amenities
+
+MODIFIED 2026-04-12: adc_mention_rate rounding changed from 4 to 2 decimals.
+Reason: Reduce precision to match reporting requirements.
+Affects: gold_amenity_desc_consistency, rpt_amenity_desc_consistency (S3 + GeoSpot).
 """
 import re
 from typing import Callable
@@ -249,7 +253,7 @@ def core_amenity_desc_consistency(
             "adc_total_tagged": total_t,
             "adc_total_mentioned": total_m,
             "adc_total_omitted": total_o,
-            "adc_mention_rate": round(rate, 4),
+            "adc_mention_rate": round(rate, 2),  # Rounded to 2 decimals (changed 2026-04-12 from 4)
             "adc_category_id": cat_id,
             "adc_category": _CATEGORY_LABELS[cat_id],
         })
