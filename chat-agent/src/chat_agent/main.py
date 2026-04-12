@@ -71,6 +71,57 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/debug/test-claude-cli")
+async def debug_test_claude_cli() -> dict:
+    """Debug endpoint to test claude CLI directly in the container."""
+    import asyncio
+    import os
+
+    env = os.environ.copy()
+    env.update({
+        "CLAUDE_CODE_USE_BEDROCK": "1",
+        "AWS_REGION": "us-east-1",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": "us.anthropic.claude-sonnet-4-6",
+    })
+
+    cmd = [
+        "claude", "-p", "say hello",
+        "--output-format", "json",
+        "--bare",
+        "--verbose",
+        "--dangerously-skip-permissions",
+        "--max-turns", "1",
+    ]
+
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=10)
+            return {
+                "status": "completed",
+                "exit_code": process.returncode,
+                "stdout": stdout.decode()[:1000],
+                "stderr": stderr.decode()[:1000],
+            }
+        except asyncio.TimeoutError:
+            process.kill()
+            return {
+                "status": "timeout",
+                "message": "Claude CLI timed out after 10 seconds",
+            }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+        }
+
+
 @app.post(
     "/chat/webhook",
     dependencies=[Depends(verify_google_chat_token)],
