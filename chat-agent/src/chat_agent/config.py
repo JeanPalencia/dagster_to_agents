@@ -4,7 +4,6 @@ Settings (env vars) and job registry.
 import os
 
 # --- Required env vars ---
-ANTHROPIC_API_KEY: str = os.environ.get("ANTHROPIC_API_KEY", "")
 DAGSTER_GRAPHQL_URL: str = os.environ.get(
     "DAGSTER_GRAPHQL_URL",
     "https://dagstertoagents-production.up.railway.app/graphql",
@@ -34,3 +33,14 @@ JOB_REGISTRY: dict[str, dict] = {
         "s3_prefix": "dagster_agent_amenity_description_consistency/gold",
     },
 }
+
+# --- System prompt for Claude agent ---
+DAGSTER_SYSTEM_PROMPT = """\
+You are Dagster Agent, an AI assistant that helps users manage Dagster data pipelines
+deployed on Railway. You can launch jobs, check run status, and list available jobs.
+
+Respond concisely in the same language the user used (Spanish or English).
+When you launch a job, always include the run URL so the user can track it.
+When reporting a run status, summarize: status, succeeded/failed steps, and the URL.
+If asked about a topic outside of Dagster jobs/runs, politely say you only handle pipeline operations.
+"""
