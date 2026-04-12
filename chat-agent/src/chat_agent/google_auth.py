@@ -8,6 +8,8 @@ Docs: https://developers.google.com/chat/how-tos/authorize-chat-app
 """
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import os
 
@@ -18,6 +20,19 @@ from google.oauth2 import id_token
 from chat_agent.config import GOOGLE_CHAT_AUDIENCE
 
 logger = logging.getLogger(__name__)
+
+
+def _decode_jwt_payload(token: str) -> dict:
+    """Decode JWT payload without verifying signature."""
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return {}
+        padding = 4 - len(parts[1]) % 4
+        payload_bytes = base64.urlsafe_b64decode(parts[1] + "=" * padding)
+        return json.loads(payload_bytes.decode())
+    except Exception:
+        return {}
 
 # Expected audience: the GCP project number
 # Google Chat sets aud = project number (as string)
@@ -42,6 +57,11 @@ async def verify_google_chat_token(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Missing Bearer token")
 
     token = auth_header.removeprefix("Bearer ")
+
+    # Log raw payload for debugging audience mismatch
+    raw = _decode_jwt_payload(token)
+    logger.info("JWT raw payload: aud=%r iss=%r", raw.get("aud"), raw.get("iss"))
+    logger.info("Expected audience: %r", GOOGLE_CHAT_AUDIENCE)
 
     try:
         claims = id_token.verify_token(
