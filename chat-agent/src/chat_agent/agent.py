@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 _MCP_CONFIG_PATH = "/app/mcp.json"
 _MAX_TURNS = 10
-_TIMEOUT_SECONDS = 120
+_TIMEOUT_SECONDS = 30  # Reduced from 120 - Google Chat webhooks timeout at 30s anyway
 
 
 async def run_agent(user_message: str, session_id: str | None = None) -> tuple[str, str | None]:
@@ -32,6 +32,7 @@ async def run_agent(user_message: str, session_id: str | None = None) -> tuple[s
         "claude",
         "-p", user_message,
         "--output-format", "json",
+        "--bare",  # Skip auto-discovery for faster startup
         "--mcp-config", _MCP_CONFIG_PATH,
         "--system-prompt", DAGSTER_SYSTEM_PROMPT,
         "--allowedTools", "mcp__dagster__list_jobs,mcp__dagster__launch_job,mcp__dagster__get_run_status,mcp__dagster__get_recent_runs",
@@ -59,13 +60,18 @@ async def run_agent(user_message: str, session_id: str | None = None) -> tuple[s
             timeout=_TIMEOUT_SECONDS,
         )
 
+        # Always log stderr for debugging
+        stderr_text = stderr.decode()
+        if stderr_text:
+            logger.info("claude CLI stderr: %s", stderr_text[:500])  # First 500 chars
+
         if process.returncode != 0:
-            logger.error("claude CLI failed (exit %d): %s", process.returncode, stderr.decode())
+            logger.error("claude CLI failed (exit %d): %s", process.returncode, stderr_text)
             return f"Error: Claude CLI failed with exit code {process.returncode}", None
 
         # Parse JSON output
         output = stdout.decode()
-        logger.debug("claude CLI output: %s", output)
+        logger.info("claude CLI stdout (%d bytes): %s", len(output), output[:200] if len(output) > 200 else output)
 
         try:
             result = json.loads(output)
@@ -81,6 +87,12 @@ async def run_agent(user_message: str, session_id: str | None = None) -> tuple[s
 
     except asyncio.TimeoutError:
         logger.error("claude CLI timed out after %d seconds", _TIMEOUT_SECONDS)
+        # Kill the process
+        try:
+            process.kill()
+            await process.wait()
+        except Exception as kill_exc:
+            logger.warning("Failed to kill timed-out process: %s", kill_exc)
         return f"Error: Request timed out after {_TIMEOUT_SECONDS} seconds", None
     except Exception as exc:
         logger.exception("Unexpected error running claude CLI: %s", exc)

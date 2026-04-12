@@ -19,7 +19,9 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
 # Create non-root user
 RUN useradd -m -u 1000 appuser && \
     mkdir -p /app && \
-    chown -R appuser:appuser /app
+    chown -R appuser:appuser /app && \
+    mkdir -p /home/appuser/.claude && \
+    chown -R appuser:appuser /home/appuser/.claude
 
 WORKDIR /app
 
