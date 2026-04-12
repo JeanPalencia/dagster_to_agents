@@ -11,14 +11,25 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # Install Claude Code CLI globally
 RUN npm install -g @anthropic-ai/claude-code
 
-# Install UV
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.local/bin:$PATH"
+# Install UV and make it globally available
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    cp /root/.local/bin/uv /usr/local/bin/uv && \
+    cp /root/.local/bin/uvx /usr/local/bin/uvx
+
+# Create non-root user
+RUN useradd -m -u 1000 appuser && \
+    mkdir -p /app && \
+    chown -R appuser:appuser /app
 
 WORKDIR /app
 
-COPY . .
+# Switch to non-root user
+USER appuser
 
+# Copy files as appuser
+COPY --chown=appuser:appuser . .
+
+# Install Python dependencies as appuser
 RUN uv sync
 
 ENV PATH="/app/.venv/bin:$PATH"
