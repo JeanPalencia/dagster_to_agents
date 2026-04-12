@@ -9,7 +9,7 @@ Desplegado en Railway. La producción corre en AWS EC2 (CodeDeploy) con código 
 
 ```
 dagster-pipeline/          # Paquete Python principal (Dagster)
-chat-agent/                # Agente Google Chat → Dagster (FastAPI + Claude API)
+chat-agent/                # Agente Google Chat → Dagster (FastAPI + AWS Bedrock)
 lakehouse-sdk/             # SDK de utilidades (no es dependencia de dagster-pipeline)
 Dockerfile                 # Build para Railway — servicio dagster_to_agents
 start.sh                   # Arranque: dagster-daemon (bg) + dagster-webserver
@@ -112,19 +112,19 @@ Cualquier módulo que importe `defs` debe tratarlo como objeto: `defs.get_reposi
 ## chat-agent — Agente Google Chat
 
 Servicio FastAPI independiente desplegado en Railway como segundo servicio del proyecto.
-Recibe mensajes de Google Chat, los procesa con Claude (tool_use), y llama al GraphQL de Dagster.
+Recibe mensajes de Google Chat, los procesa con Claude via AWS Bedrock (tool_use), y llama al GraphQL de Dagster.
 
 ```
 chat-agent/
     Dockerfile              # python:3.12-slim + uv, expone puerto 8000
     railway.toml            # builder=DOCKERFILE, healthcheck=/health
-    pyproject.toml          # fastapi, uvicorn, anthropic, httpx, google-auth
+    pyproject.toml          # fastapi, uvicorn, boto3, httpx, google-auth
     src/chat_agent/
-        main.py             # POST /chat/webhook  +  GET /health
-        agent.py            # Loop Claude tool_use (max 10 iteraciones)
+        main.py             # POST /chat/webhook  +  GET /health (formato Google Workspace Add-on)
+        agent.py            # Loop Claude tool_use via Bedrock (claude-sonnet-4-6, max 10 iteraciones)
         tools.py            # GraphQL: launch_job, get_run_status, get_recent_runs, list_jobs
         config.py           # Env vars + JOB_REGISTRY
-        google_auth.py      # Verifica JWT de Google Chat (omitir si PROJECT_NUMBER vacío)
+        google_auth.py      # Verifica JWT de Google Chat con audience = webhook URL
 ```
 
 ### Deploy en Railway
@@ -135,11 +135,21 @@ chat-agent/
 
 | Variable | Valor |
 |---|---|
-| `ANTHROPIC_API_KEY` | API key de Anthropic |
+| `AWS_ACCESS_KEY_ID` | Credenciales AWS (mismas que para S3 en dagster_to_agents) |
+| `AWS_SECRET_ACCESS_KEY` | Credenciales AWS (mismas que para S3) |
+| `AWS_SESSION_TOKEN` | Token STS temporal (si las creds son ASIA*) |
+| `AWS_DEFAULT_REGION` | `us-east-1` |
 | `DAGSTER_GRAPHQL_URL` | `https://dagstertoagents-production.up.railway.app/graphql` |
-| `GOOGLE_CHAT_PROJECT_NUMBER` | Número de proyecto GCP (dejar vacío para omitir verificación JWT) |
+| `GOOGLE_CHAT_AUDIENCE` | URL completa del webhook: `https://<domain>/chat/webhook` |
 
 4. Generar dominio público → usar como webhook URL en Google Chat API config
+
+**Nota sobre Google Chat JWT**: El app usa formato Google Workspace Add-ons, donde:
+- `aud` en el JWT = URL del webhook (con espacio al final que se stripea)
+- `iss` = `https://accounts.google.com` (no `chat@system.gserviceaccount.com`)
+- El body del evento viene en `body["chat"]["messagePayload"]["message"]["text"]`
+
+**Nota sobre AWS Bedrock**: El modelo se invoca via `bedrock-runtime.invoke_model()` con `us.anthropic.claude-sonnet-4-6`. Todos los content blocks requieren `{"type": "text", "text": "..."}` explícito (system, messages, tool_result). Los campos de respuesta son snake_case (`stop_reason`, no `stopReason`).
 
 ### Agregar un nuevo job al agente
 
