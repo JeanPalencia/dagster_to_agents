@@ -68,7 +68,11 @@ def _chat_response(text: str) -> dict:
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok"}
+    import shutil
+    return {
+        "status": "ok",
+        "engram": shutil.which("engram") or "NOT FOUND",
+    }
 
 
 @app.post(
