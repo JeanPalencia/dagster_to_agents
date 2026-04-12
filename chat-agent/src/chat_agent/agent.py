@@ -37,7 +37,6 @@ async def run_agent(user_message: str, session_id: str | None = None) -> tuple[s
         "--allowedTools", "mcp__dagster__list_jobs,mcp__dagster__launch_job,mcp__dagster__get_run_status,mcp__dagster__get_recent_runs",
         "--dangerously-skip-permissions",
         "--max-turns", str(_MAX_TURNS),
-        "--no-update-check",
     ]
 
     # Add session resume if we have a previous session
