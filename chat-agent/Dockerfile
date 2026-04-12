@@ -26,8 +26,9 @@ COPY . .
 # Download dagster-pipeline and .claude from GitHub (sparse, no full clone)
 ARG GITHUB_REPO=JeanPalencia/dagster_to_agents
 ARG GITHUB_BRANCH=main
+ARG GITHUB_TOKEN
 RUN git clone --depth 1 --filter=blob:none --sparse \
-      https://github.com/${GITHUB_REPO}.git /tmp/repo && \
+      https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git /tmp/repo && \
     cd /tmp/repo && \
     git sparse-checkout set dagster-pipeline .claude && \
     cp -r dagster-pipeline /app/dagster-pipeline && \
