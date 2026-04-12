@@ -172,3 +172,26 @@ Editar `chat-agent/src/chat_agent/config.py` → `JOB_REGISTRY`:
 | `dagster-pipeline/dagster.yaml` | Config de Dagster: storage en Railway Postgres |
 | `start.sh` | Entrypoint Railway: mapea `DATABASE_URL` → `DAGSTER_PG_*`, arranca daemon + webserver |
 | `chat-agent/src/chat_agent/config.py` | JOB_REGISTRY — agregar nuevos jobs aquí para que el agente los conozca |
+
+## Agentes disponibles
+
+Este proyecto tiene agentes especializados que se activan automáticamente según el contexto:
+
+| Contexto | Agente | Propósito |
+|----------|--------|-----------|
+| Modificar lógica de columna en silver/gold, cambiar cálculos en tablas lakehouse | `logic_modifier` | Modifica la lógica de cálculo de columnas existentes preservando estructura y patrones arquitecturales |
+
+### logic_modifier
+
+**Cuándo se activa**: Cuando solicitas modificar cómo se calcula una columna existente en una tabla lakehouse (ej: "cambiar la forma en que se calcula X", "agregar prefijo a Y columna").
+
+**Qué hace**:
+- Modifica lógica de columnas existentes en assets silver (STG o Core)
+- Preserva estructura de tabla (mismas columnas, mismo schema)
+- Sigue 100% `dagster-pipeline/ARCHITECTURE.md`
+- Ejecuta en worktree aislado para testing
+- Valida cambios con backfills antes de merge
+
+**Ubicación**: `.claude/agents/logic_modifier.md`
+
+**Uso**: Se invoca automáticamente - no es necesario llamarlo explícitamente.
