@@ -19,6 +19,11 @@ from chat_agent.config import GOOGLE_CHAT_PROJECT_NUMBER
 # Expected audience: the GCP project number
 # Google Chat sets aud = project number (as string)
 _CHAT_ISSUER = "chat@system.gserviceaccount.com"
+# Google Chat tokens are signed by its own service account, not standard OAuth2 keys.
+_CHAT_CERTS_URL = (
+    "https://www.googleapis.com/service_accounts/v1/metadata/x509/"
+    "chat@system.gserviceaccount.com"
+)
 
 
 async def verify_google_chat_token(request: Request) -> None:
@@ -43,6 +48,7 @@ async def verify_google_chat_token(request: Request) -> None:
             token,
             google_requests.Request(),
             audience=GOOGLE_CHAT_PROJECT_NUMBER,
+            certs_url=_CHAT_CERTS_URL,
         )
     except Exception as exc:
         raise HTTPException(status_code=401, detail=f"Invalid token: {exc}") from exc
