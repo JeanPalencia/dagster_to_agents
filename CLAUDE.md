@@ -116,17 +116,18 @@ Recibe mensajes de Google Chat, los procesa con **Claude Agent SDK** via AWS Bed
 
 ```
 chat-agent/
-    Dockerfile              # python:3.12-slim + uv, non-root (appuser), expone puerto 8000
+    Dockerfile              # python:3.12-slim + uv + engram binary, non-root (appuser), puerto 8000
     railway.toml            # builder=DOCKERFILE, healthcheck=/health
     pyproject.toml          # fastapi, uvicorn, claude-agent-sdk, httpx, google-auth
     src/chat_agent/
         main.py             # POST /chat/webhook  +  GET /health (formato Google Workspace Add-on)
-        agent.py            # Claude Agent SDK: query() con MCP tools, session tracking por space
+        agent.py            # _MCP_REGISTRY → allowed_tools + mcp_servers + system prompt dinámico
         tools.py            # GraphQL: launch_job, get_run_status, get_recent_runs, list_jobs
-        config.py           # Env vars + JOB_REGISTRY + DAGSTER_SYSTEM_PROMPT
+        config.py           # Env vars + JOB_REGISTRY + build_system_prompt()
         google_auth.py      # Verifica JWT de Google Chat con audience = webhook URL
     src/dagster_mcp/
         server.py           # Tools de Dagster con @tool decorator (McpSdkServerConfig, in-process)
+                            # Exporta DAGSTER_TOOLS (lista de tool objects) usado por agent.py
 ```
 
 ### Arquitectura del agente
@@ -167,8 +168,10 @@ Agregar una entrada a `_MCP_REGISTRY` en `chat-agent/src/chat_agent/agent.py`:
 | `AWS_DEFAULT_REGION` | `us-east-1` |
 | `DAGSTER_GRAPHQL_URL` | `https://dagstertoagents-production.up.railway.app/graphql` |
 | `GOOGLE_CHAT_AUDIENCE` | URL completa del webhook: `https://<domain>/chat/webhook` |
+| `ENGRAM_DATA_DIR` | `/data/.engram` (Railway Volume montado en `/data`) |
 
-4. Generar dominio público → usar como webhook URL en Google Chat API config
+4. Crear Railway Volume `dagster-chat2-volume` con mount path `/data` (para persistir Engram DB)
+5. Generar dominio público → usar como webhook URL en Google Chat API config
 
 > **⚠️ Credenciales STS (ASIA\*)**: Si `AWS_ACCESS_KEY_ID` empieza con `ASIA`, son temporales y expiran.
 > Síntoma: el agente no responde (el SDK hace retries silenciosos con 403 authentication_failed).
@@ -203,7 +206,8 @@ Editar `chat-agent/src/chat_agent/config.py` → `JOB_REGISTRY` (también actual
 | `dagster-pipeline/src/dagster_pipeline/defs/pipeline_asset_error_handling.py` | Error metadata wrapper — usa `defs.get_repository_def()` (instancia, no callable) |
 | `dagster-pipeline/dagster.yaml` | Config de Dagster: storage en Railway Postgres |
 | `start.sh` | Entrypoint Railway: mapea `DATABASE_URL` → `DAGSTER_PG_*`, arranca daemon + webserver |
-| `chat-agent/src/chat_agent/config.py` | JOB_REGISTRY — agregar nuevos jobs aquí para que el agente los conozca |
+| `chat-agent/src/chat_agent/config.py` | `JOB_REGISTRY` + `build_system_prompt()` — el prompt se genera dinámicamente desde el registry |
+| `chat-agent/src/chat_agent/agent.py` | `_MCP_REGISTRY` — agregar nuevas capabilities aquí |
 
 ## Auto-activación de agentes
 
