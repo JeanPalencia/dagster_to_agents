@@ -23,17 +23,14 @@ WORKDIR /app
 # Copy chat-agent source
 COPY . .
 
-# Download dagster-pipeline and .claude from GitHub (sparse, no full clone)
+# Clone full repo so logic_modifier can commit and push changes
 ARG GITHUB_REPO=JeanPalencia/dagster_to_agents
 ARG GITHUB_BRANCH=main
 ARG GITHUB_TOKEN
-RUN git clone --depth 1 --filter=blob:none --sparse \
-      https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git /tmp/repo && \
-    cd /tmp/repo && \
-    git sparse-checkout set dagster-pipeline .claude && \
-    cp -r dagster-pipeline /app/dagster-pipeline && \
-    cp -r .claude /app/.claude && \
-    rm -rf /tmp/repo
+RUN git clone --depth 1 \
+      https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git /app/repo && \
+    git -C /app/repo config user.email "dagster-agent@railway.app" && \
+    git -C /app/repo config user.name "Dagster Agent"
 RUN uv sync && chown -R appuser:appuser /app
 
 ENV PATH="/app/.venv/bin:$PATH"

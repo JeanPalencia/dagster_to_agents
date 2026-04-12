@@ -118,7 +118,7 @@ async def run_agent(user_message: str, session_id: str | None = None) -> tuple[s
         permission_mode="bypassPermissions",
         max_turns=_MAX_TURNS,
         resume=session_id,
-        cwd="/app",  # ensures bundled CLI reads .claude/agents/ from the repo
+        cwd="/app/repo",  # full repo clone — CLI reads .claude/agents/ and can git push
         env={
             "CLAUDE_CODE_USE_BEDROCK": "1",
             "AWS_ACCESS_KEY_ID": os.environ.get("AWS_ACCESS_KEY_ID", ""),
