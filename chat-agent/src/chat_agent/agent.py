@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 _MCP_CONFIG_PATH = "/app/mcp.json"
 _MAX_TURNS = 10
-_TIMEOUT_SECONDS = 30  # Reduced from 120 - Google Chat webhooks timeout at 30s anyway
+_TIMEOUT_SECONDS = 60  # Increased temporarily for debugging with --verbose
 
 
 async def run_agent(user_message: str, session_id: str | None = None) -> tuple[str, str | None]:
@@ -34,6 +34,7 @@ async def run_agent(user_message: str, session_id: str | None = None) -> tuple[s
         "-p", user_message,
         "--output-format", "json",
         "--bare",  # Skip auto-discovery for faster startup
+        "--verbose",  # Enable verbose logging
         "--mcp-config", _MCP_CONFIG_PATH,
         "--system-prompt", DAGSTER_SYSTEM_PROMPT,
         "--allowedTools", "mcp__dagster__list_jobs,mcp__dagster__launch_job,mcp__dagster__get_run_status,mcp__dagster__get_recent_runs",
@@ -81,10 +82,10 @@ async def run_agent(user_message: str, session_id: str | None = None) -> tuple[s
             timeout=_TIMEOUT_SECONDS,
         )
 
-        # Always log stderr for debugging
+        # Always log stderr for debugging (full output in verbose mode)
         stderr_text = stderr.decode()
         if stderr_text:
-            logger.info("claude CLI stderr: %s", stderr_text[:500])  # First 500 chars
+            logger.info("claude CLI stderr (%d bytes):\n%s", len(stderr_text), stderr_text)
 
         if process.returncode != 0:
             logger.error("claude CLI failed (exit %d): %s", process.returncode, stderr_text)
