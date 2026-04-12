@@ -173,6 +173,16 @@ Editar `chat-agent/src/chat_agent/config.py` → `JOB_REGISTRY`:
 | `start.sh` | Entrypoint Railway: mapea `DATABASE_URL` → `DAGSTER_PG_*`, arranca daemon + webserver |
 | `chat-agent/src/chat_agent/config.py` | JOB_REGISTRY — agregar nuevos jobs aquí para que el agente los conozca |
 
+## Auto-activación de agentes
+
+Cuando se detecta cualquiera de estos contextos, el agente correspondiente se delega AUTOMÁTICAMENTE:
+
+| Contexto | Agente |
+|----------|--------|
+| Modificar lógica de columna en silver/gold, cambiar cálculos en tablas lakehouse | logic_modifier |
+
+**Nota**: Los agentes se invocan con `Agent(subagent_type="...", ...)`, NO con `Skill(...)`.
+
 ## Agentes disponibles
 
 Este proyecto tiene agentes especializados que se activan automáticamente según el contexto:
