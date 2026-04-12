@@ -7,6 +7,7 @@ and returns the final text response plus session ID.
 from __future__ import annotations
 
 import logging
+import os
 
 from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
@@ -34,9 +35,17 @@ async def run_agent(user_message: str, session_id: str | None = None) -> tuple[s
             "mcp__dagster__get_run_status",
             "mcp__dagster__get_recent_runs",
         ],
-        permission_mode="bypassPermissions",  # Auto-approve all pre-allowed tools
+        permission_mode="bypassPermissions",
         max_turns=_MAX_TURNS,
-        resume=session_id,  # Resume previous session if provided
+        resume=session_id,
+        # Pass Bedrock credentials to the bundled CLI subprocess
+        env={
+            "CLAUDE_CODE_USE_BEDROCK": "1",
+            "AWS_ACCESS_KEY_ID": os.environ.get("AWS_ACCESS_KEY_ID", ""),
+            "AWS_SECRET_ACCESS_KEY": os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
+            "AWS_SESSION_TOKEN": os.environ.get("AWS_SESSION_TOKEN", ""),
+            "AWS_DEFAULT_REGION": os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+        },
     )
 
     logger.info("Running Claude Agent SDK for: %s", user_message[:100])
