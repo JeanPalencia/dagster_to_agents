@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from claude_agent_sdk import ClaudeAgentOptions, query
+from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
 from chat_agent.config import DAGSTER_SYSTEM_PROMPT
 from dagster_mcp.server import dagster_server
@@ -50,13 +50,13 @@ async def run_agent(user_message: str, session_id: str | None = None) -> tuple[s
             if hasattr(message, 'session_id') and message.session_id:
                 new_session_id = message.session_id
 
-            # Handle result messages
-            if message.type == "result":
+            # Handle result messages using isinstance (not .type — SystemMessage has no .type)
+            if isinstance(message, ResultMessage):
                 if message.subtype == "success":
                     response_text = message.result or "(no response)"
                     logger.info("Agent completed successfully")
                 elif message.subtype == "error_during_execution":
-                    response_text = f"Error: {message.error_message}"
+                    response_text = f"Error: {getattr(message, 'error_message', str(message))}"
                     logger.error("Agent error: %s", message.error_message)
                 else:
                     response_text = f"Agent finished with: {message.subtype}"
