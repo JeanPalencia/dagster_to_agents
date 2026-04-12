@@ -1,15 +1,28 @@
 """
 FastAPI app — Google Chat webhook + health check.
 
-Google Chat event schema (simplified):
+This app uses the Google Workspace Add-ons event format (not classic Chat API).
+Actual event structure received:
 {
-  "type": "MESSAGE",
-  "message": { "text": "run amenity job", "sender": { "displayName": "..." } },
-  "space": { "name": "spaces/XXXXX" }
+  "commonEventObject": { "hostApp": "CHAT", ... },
+  "chat": {
+    "user": { "displayName": "...", "email": "..." },
+    "eventTime": "...",
+    "messagePayload": {
+      "message": { "text": "list jobs", ... },
+      "space": { ... }
+    }
+  }
 }
 
-Google Chat expects a sync JSON response within 30s:
-{ "text": "<response text>" }
+Response format for Chat add-ons:
+{
+  "hostAppDataAction": {
+    "chatDataAction": {
+      "createMessageAction": { "message": { "text": "..." } }
+    }
+  }
+}
 """
 from __future__ import annotations
 
@@ -27,6 +40,19 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Dagster Chat Agent")
 
 
+def _chat_response(text: str) -> dict:
+    """Build a Google Workspace Add-on Chat response."""
+    return {
+        "hostAppDataAction": {
+            "chatDataAction": {
+                "createMessageAction": {
+                    "message": {"text": text}
+                }
+            }
+        }
+    }
+
+
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok"}
@@ -37,34 +63,24 @@ async def health() -> dict:
     dependencies=[Depends(verify_google_chat_token)],
 )
 async def chat_webhook(request: Request) -> JSONResponse:
-    """
-    Receives Google Chat events and responds with the agent's reply.
-
-    Handles MESSAGE events. All other event types (ADDED_TO_SPACE,
-    REMOVED_FROM_SPACE, CARD_CLICKED) are acknowledged silently.
-    """
     body: dict = await request.json()
-    logger.info("Webhook body keys=%s body=%s", list(body.keys()), body)
-    event_type: str = body.get("type", "")
 
-    # Silently acknowledge non-message events
-    if event_type != "MESSAGE":
-        logger.info("Received event type=%r — ignoring", event_type)
-        return JSONResponse({"text": ""})
-
-    message = body.get("message", {})
+    chat_event = body.get("chat", {})
+    message_payload = chat_event.get("messagePayload", {})
+    message = message_payload.get("message", {})
     user_text: str = message.get("text", "").strip()
-    sender: str = message.get("sender", {}).get("displayName", "User")
 
     if not user_text:
-        return JSONResponse({"text": "No message received."})
+        logger.info("No message text in payload — ignoring")
+        return JSONResponse({})
 
+    sender: str = chat_event.get("user", {}).get("displayName", "User")
     logger.info("Message from %s: %s", sender, user_text)
 
     try:
         reply = await run_agent(user_text)
     except Exception as exc:
         logger.exception("Agent error: %s", exc)
-        reply = f"An error occurred while processing your request: {exc}"
+        reply = f"Error procesando tu mensaje: {exc}"
 
-    return JSONResponse({"text": reply})
+    return JSONResponse(_chat_response(reply))
