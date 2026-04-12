@@ -4,14 +4,15 @@ Google Chat JWT verification.
 Google Chat sends a Bearer token with every webhook request.
 We verify it to reject spoofed requests.
 
-Docs: https://developers.google.com/chat/how-tos/authorize-chat-app
+Confirmed token format (from logs):
+  iss = 'https://accounts.google.com'
+  aud = '<webhook_url> '  (trailing space — stripped before comparison)
 """
 from __future__ import annotations
 
 import base64
 import json
 import logging
-import os
 
 from fastapi import HTTPException, Request
 from google.auth.transport import requests as google_requests
@@ -20,6 +21,8 @@ from google.oauth2 import id_token
 from chat_agent.config import GOOGLE_CHAT_AUDIENCE
 
 logger = logging.getLogger(__name__)
+
+_GOOGLE_ISSUER = "https://accounts.google.com"
 
 
 def _decode_jwt_payload(token: str) -> dict:
@@ -34,22 +37,15 @@ def _decode_jwt_payload(token: str) -> dict:
     except Exception:
         return {}
 
-# Expected audience: the GCP project number
-# Google Chat sets aud = project number (as string)
-_CHAT_ISSUER = "chat@system.gserviceaccount.com"
-# Google Chat tokens are signed with Google's standard OAuth2 keys (not Chat's own SA keys).
-# The iss claim identifies the sender as Chat, but key lookup uses the standard certs URL.
-
 
 async def verify_google_chat_token(request: Request) -> None:
     """
     Extracts and verifies the Google Chat Bearer token.
     Raises HTTP 401 if the token is invalid or missing.
 
-    Set GOOGLE_CHAT_PROJECT_NUMBER="" to skip verification (dev/testing only).
+    Set GOOGLE_CHAT_AUDIENCE="" to skip verification (local dev only).
     """
     if not GOOGLE_CHAT_AUDIENCE:
-        # Verification disabled — only safe for local testing
         return
 
     auth_header = request.headers.get("Authorization", "")
@@ -58,25 +54,30 @@ async def verify_google_chat_token(request: Request) -> None:
 
     token = auth_header.removeprefix("Bearer ")
 
-    # Log raw payload for debugging audience mismatch
+    # Decode payload to get the raw aud (may have trailing space).
     raw = _decode_jwt_payload(token)
-    logger.info("JWT raw payload: aud=%r iss=%r", raw.get("aud"), raw.get("iss"))
-    logger.info("Expected audience: %r", GOOGLE_CHAT_AUDIENCE)
+    raw_aud = raw.get("aud", "")
+    logger.info("JWT raw aud=%r iss=%r", raw_aud, raw.get("iss"))
 
+    # Audience check: strip whitespace before comparing.
+    if raw_aud.strip() != GOOGLE_CHAT_AUDIENCE.strip():
+        logger.error("Audience mismatch: token=%r expected=%r", raw_aud, GOOGLE_CHAT_AUDIENCE)
+        raise HTTPException(status_code=401, detail="Invalid audience")
+
+    # Verify signature using Google's standard OAuth2 certs.
+    # Pass the token's raw aud (with space) so verify_token's internal check passes.
     try:
         claims = id_token.verify_token(
             token,
             google_requests.Request(),
-            audience=GOOGLE_CHAT_AUDIENCE,
+            audience=raw_aud,
         )
     except Exception as exc:
-        logger.error("JWT verification failed — audience=%s error=%s", GOOGLE_CHAT_AUDIENCE, exc)
+        logger.error("JWT signature verification failed: %s", exc)
         raise HTTPException(status_code=401, detail=f"Invalid token: {exc}") from exc
 
-    if claims.get("iss") != _CHAT_ISSUER:
-        logger.error("Wrong issuer — expected=%s got=%s", _CHAT_ISSUER, claims.get("iss"))
-        raise HTTPException(
-            status_code=401,
-            detail=f"Unexpected issuer: {claims.get('iss')}",
-        )
-    logger.info("JWT verified OK — iss=%s aud=%s", claims.get("iss"), claims.get("aud"))
+    if claims.get("iss") != _GOOGLE_ISSUER:
+        logger.error("Wrong issuer: %r", claims.get("iss"))
+        raise HTTPException(status_code=401, detail=f"Unexpected issuer: {claims.get('iss')}")
+
+    logger.info("JWT verified OK")
