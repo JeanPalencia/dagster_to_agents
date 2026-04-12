@@ -9,8 +9,9 @@ Desplegado en Railway. La producción corre en AWS EC2 (CodeDeploy) con código 
 
 ```
 dagster-pipeline/          # Paquete Python principal (Dagster)
+chat-agent/                # Agente Google Chat → Dagster (FastAPI + Claude API)
 lakehouse-sdk/             # SDK de utilidades (no es dependencia de dagster-pipeline)
-Dockerfile                 # Build para Railway (python:3.12-slim + uv)
+Dockerfile                 # Build para Railway — servicio dagster_to_agents
 start.sh                   # Arranque: dagster-daemon (bg) + dagster-webserver
 railway.toml               # Config Railway: builder=DOCKERFILE, healthcheck=/healthz
 ```
@@ -108,6 +109,49 @@ patrón moderno (Dagster 1.x): `defs` es una instancia directa y no es callable.
 Cualquier módulo que importe `defs` debe tratarlo como objeto: `defs.get_repository_def()`,
 **no** `defs().get_repository_def()`.
 
+## chat-agent — Agente Google Chat
+
+Servicio FastAPI independiente desplegado en Railway como segundo servicio del proyecto.
+Recibe mensajes de Google Chat, los procesa con Claude (tool_use), y llama al GraphQL de Dagster.
+
+```
+chat-agent/
+    Dockerfile              # python:3.12-slim + uv, expone puerto 8000
+    railway.toml            # builder=DOCKERFILE, healthcheck=/health
+    pyproject.toml          # fastapi, uvicorn, anthropic, httpx, google-auth
+    src/chat_agent/
+        main.py             # POST /chat/webhook  +  GET /health
+        agent.py            # Loop Claude tool_use (max 10 iteraciones)
+        tools.py            # GraphQL: launch_job, get_run_status, get_recent_runs, list_jobs
+        config.py           # Env vars + JOB_REGISTRY
+        google_auth.py      # Verifica JWT de Google Chat (omitir si PROJECT_NUMBER vacío)
+```
+
+### Deploy en Railway
+
+1. Dashboard → proyecto `dagster-to-agents` → **"+ New"** → **"GitHub Repo"**
+2. Root directory: `chat-agent/`
+3. Variables requeridas:
+
+| Variable | Valor |
+|---|---|
+| `ANTHROPIC_API_KEY` | API key de Anthropic |
+| `DAGSTER_GRAPHQL_URL` | `https://dagstertoagents-production.up.railway.app/graphql` |
+| `GOOGLE_CHAT_PROJECT_NUMBER` | Número de proyecto GCP (dejar vacío para omitir verificación JWT) |
+
+4. Generar dominio público → usar como webhook URL en Google Chat API config
+
+### Agregar un nuevo job al agente
+
+Editar `chat-agent/src/chat_agent/config.py` → `JOB_REGISTRY`:
+```python
+"new_job_name": {
+    "description": "What this job does",
+    "target_table": "dagster_agent_rpt_...",
+    "s3_prefix": "dagster_agent_.../gold",
+},
+```
+
 ## Archivos clave
 
 | Archivo | Qué hace |
@@ -117,3 +161,4 @@ Cualquier módulo que importe `defs` debe tratarlo como objeto: `defs.get_reposi
 | `dagster-pipeline/src/dagster_pipeline/defs/pipeline_asset_error_handling.py` | Error metadata wrapper — usa `defs.get_repository_def()` (instancia, no callable) |
 | `dagster-pipeline/dagster.yaml` | Config de Dagster: storage en Railway Postgres |
 | `start.sh` | Entrypoint Railway: mapea `DATABASE_URL` → `DAGSTER_PG_*`, arranca daemon + webserver |
+| `chat-agent/src/chat_agent/config.py` | JOB_REGISTRY — agregar nuevos jobs aquí para que el agente los conozca |
