@@ -3,9 +3,11 @@ FROM python:3.12-slim
 # Install curl
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# Install UV
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.local/bin:$PATH"
+# Install UV and make it executable by all users
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    cp /root/.local/bin/uv /usr/local/bin/uv && \
+    cp /root/.local/bin/uvx /usr/local/bin/uvx && \
+    chmod 755 /usr/local/bin/uv /usr/local/bin/uvx
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && \
@@ -14,16 +16,14 @@ RUN useradd -m -u 1000 appuser && \
 
 WORKDIR /app
 
-# Switch to non-root user
-USER appuser
-
-# Copy files as appuser
-COPY --chown=appuser:appuser . .
-
-# Install Python dependencies as appuser
-RUN uv sync
+# Copy and install as root, then chown
+COPY . .
+RUN uv sync && chown -R appuser:appuser /app
 
 ENV PATH="/app/.venv/bin:$PATH"
+
+# Switch to non-root for runtime
+USER appuser
 
 EXPOSE 8000
 
