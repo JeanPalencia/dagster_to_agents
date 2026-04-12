@@ -98,7 +98,10 @@ async def debug_sdk_info() -> dict:
         messages = []
         async def _run():
             async for msg in query(prompt="say hello", options=options):
-                messages.append({"type": type(msg).__name__, "repr": repr(msg)[:200]})
+                if isinstance(msg, dict):
+                    messages.append({"type": "dict", "keys": list(msg.keys()), "preview": str(msg)[:300]})
+                else:
+                    messages.append({"type": type(msg).__name__, "repr": repr(msg)[:300]})
         await asyncio.wait_for(_run(), timeout=15)
         result = {"status": "ok", "messages": messages}
     except asyncio.TimeoutError:
