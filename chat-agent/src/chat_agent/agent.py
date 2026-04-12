@@ -3,15 +3,22 @@ Claude Agent SDK orchestration.
 
 ## Adding a new capability
 
-Add an entry to _MCP_REGISTRY:
-
+MCP tool (external server):
     "my_server": {
+        "kind": "mcp",
         "server": McpStdioServerConfig(command="...", args=["..."]),
-        "tools": ["mcp__my_server__tool_a", "mcp__my_server__tool_b"],
-        "internal": False,  # True = agent uses it but doesn't expose it to users
+        "tools": ["mcp__my_server__tool_a"],
+        "internal": False,
     },
 
-That's it — allowed_tools, mcp_servers, and system prompt update automatically.
+Claude Code sub-agent (defined in .claude/agents/<name>.md):
+    "my_agent": {
+        "kind": "subagent",
+        "description": "What this sub-agent does (shown to users)",
+        "internal": False,
+    },
+
+That's it — mcp_servers, allowed_tools, and system prompt update automatically.
 """
 from __future__ import annotations
 
@@ -28,16 +35,20 @@ logger = logging.getLogger(__name__)
 
 _MAX_TURNS = 10
 
-# Central registry of all MCP capabilities.
-# internal=False → user-facing (shown when asked "what can you do?")
-# internal=True  → used by the agent silently, not exposed to users
-_MCP_REGISTRY: dict[str, dict] = {
+# Central registry of all capabilities.
+# kind="mcp"      → MCP server with tools
+# kind="subagent" → Claude Code sub-agent defined in .claude/agents/<name>.md
+# internal=False  → user-facing (shown when asked "what can you do?")
+# internal=True   → used by the agent silently
+_REGISTRY: dict[str, dict] = {
     "dagster": {
+        "kind": "mcp",
         "server": dagster_server,
         "tools": [f"mcp__dagster__{t.name}" for t in DAGSTER_TOOLS],
         "internal": False,
     },
     "engram": {
+        "kind": "mcp",
         "server": McpStdioServerConfig(
             command="engram",
             args=["mcp"],
@@ -50,21 +61,47 @@ _MCP_REGISTRY: dict[str, dict] = {
         ],
         "internal": True,
     },
+    "logic_modifier": {
+        "kind": "subagent",
+        "description": (
+            "Modifica la lógica de cálculo de columnas existentes en tablas del lakehouse. "
+            "Preserva el schema, sigue ARCHITECTURE.md, valida con backfill antes de mergear."
+        ),
+        "internal": False,
+    },
 }
 
-# Derived from registry
-_MCP_SERVERS = {name: entry["server"] for name, entry in _MCP_REGISTRY.items()}
-_ALLOWED_TOOLS = [tool for entry in _MCP_REGISTRY.values() for tool in entry["tools"]]
-
-# User-facing tool names for the system prompt (strip mcp__<server>__ prefix)
-_USER_TOOL_NAMES = [
-    tool.split("__", 2)[-1]
-    for entry in _MCP_REGISTRY.values()
-    if not entry["internal"]
+# Derived from registry — don't edit manually
+_MCP_SERVERS = {
+    name: entry["server"]
+    for name, entry in _REGISTRY.items()
+    if entry["kind"] == "mcp"
+}
+_ALLOWED_TOOLS = [
+    tool
+    for entry in _REGISTRY.values()
+    if entry["kind"] == "mcp"
     for tool in entry["tools"]
 ]
 
-_SYSTEM_PROMPT = build_system_prompt(_USER_TOOL_NAMES)
+# User-facing capabilities for system prompt
+_USER_CAPABILITIES = [
+    # MCP tools: strip mcp__<server>__ prefix
+    *(
+        tool.split("__", 2)[-1]
+        for entry in _REGISTRY.values()
+        if entry["kind"] == "mcp" and not entry["internal"]
+        for tool in entry["tools"]
+    ),
+    # Sub-agents: show as "name: description"
+    *(
+        f"{name}: {entry['description']}"
+        for name, entry in _REGISTRY.items()
+        if entry["kind"] == "subagent" and not entry["internal"]
+    ),
+]
+
+_SYSTEM_PROMPT = build_system_prompt(_USER_CAPABILITIES)
 
 
 async def run_agent(user_message: str, session_id: str | None = None) -> tuple[str, str | None]:
@@ -81,6 +118,7 @@ async def run_agent(user_message: str, session_id: str | None = None) -> tuple[s
         permission_mode="bypassPermissions",
         max_turns=_MAX_TURNS,
         resume=session_id,
+        cwd="/app",  # ensures bundled CLI reads .claude/agents/ from the repo
         env={
             "CLAUDE_CODE_USE_BEDROCK": "1",
             "AWS_ACCESS_KEY_ID": os.environ.get("AWS_ACCESS_KEY_ID", ""),
@@ -88,6 +126,7 @@ async def run_agent(user_message: str, session_id: str | None = None) -> tuple[s
             "AWS_SESSION_TOKEN": os.environ.get("AWS_SESSION_TOKEN", ""),
             "AWS_DEFAULT_REGION": os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
             "ENGRAM_DATA_DIR": os.environ.get("ENGRAM_DATA_DIR", "/data/.engram"),
+            "SPOT2_API_KEY": os.environ.get("SPOT2_API_KEY", ""),
         },
     )
 
