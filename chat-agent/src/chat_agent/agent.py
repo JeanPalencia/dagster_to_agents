@@ -1,5 +1,5 @@
 """
-Claude tool_use orchestration loop.
+Claude tool_use orchestration loop via AWS Bedrock.
 
 Receives a user message, runs the agent loop (calling Dagster tools as needed),
 and returns the final text response.
@@ -8,10 +8,9 @@ from __future__ import annotations
 
 import json
 
-import anthropic
+import boto3
 
 from chat_agent import tools
-from chat_agent.config import ANTHROPIC_API_KEY
 
 _SYSTEM_PROMPT = """\
 You are Dagster Agent, an AI assistant that helps users manage Dagster data pipelines
@@ -75,6 +74,7 @@ _TOOL_DEFS = [
 ]
 
 _MAX_ITERATIONS = 10  # safety cap to avoid infinite loops
+_MODEL_ID = "us.anthropic.claude-sonnet-4-6"
 
 
 async def _execute_tool(name: str, tool_input: dict) -> str:
@@ -95,43 +95,53 @@ async def _execute_tool(name: str, tool_input: dict) -> str:
 
 async def run_agent(user_message: str) -> str:
     """
-    Run the Claude tool_use loop for a single user message.
+    Run the Claude tool_use loop for a single user message via AWS Bedrock.
     Returns the final text response.
     """
-    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
-    messages = [{"role": "user", "content": user_message}]
+    client = boto3.client("bedrock-runtime", region_name="us-east-1")
+    messages = [{"role": "user", "content": [{"text": user_message}]}]
 
     for _ in range(_MAX_ITERATIONS):
-        response = await client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
-            system=_SYSTEM_PROMPT,
-            tools=_TOOL_DEFS,
-            messages=messages,
+        # Bedrock Messages API format
+        request_body = {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 1024,
+            "system": [{"text": _SYSTEM_PROMPT}],
+            "messages": messages,
+            "tools": _TOOL_DEFS,
+        }
+
+        response = client.invoke_model(
+            modelId=_MODEL_ID,
+            body=json.dumps(request_body),
         )
+        response_body = json.loads(response["body"].read())
 
-        # Collect text content so far (may be empty on tool_use turns)
-        text_parts = [b.text for b in response.content if b.type == "text"]
+        stop_reason = response_body.get("stopReason")
+        content = response_body.get("content", [])
 
-        if response.stop_reason == "end_turn":
+        # Collect text content
+        text_parts = [block["text"] for block in content if block.get("type") == "text"]
+
+        if stop_reason == "end_turn":
             return "\n".join(text_parts) or "(no response)"
 
-        if response.stop_reason != "tool_use":
-            return "\n".join(text_parts) or f"Unexpected stop_reason: {response.stop_reason}"
+        if stop_reason != "tool_use":
+            return "\n".join(text_parts) or f"Unexpected stop_reason: {stop_reason}"
 
         # --- Process all tool_use blocks ---
-        messages.append({"role": "assistant", "content": response.content})
+        messages.append({"role": "assistant", "content": content})
 
         tool_results = []
-        for block in response.content:
-            if block.type != "tool_use":
+        for block in content:
+            if block.get("type") != "tool_use":
                 continue
-            tool_output = await _execute_tool(block.name, block.input)
+            tool_output = await _execute_tool(block["name"], block["input"])
             tool_results.append(
                 {
                     "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": tool_output,
+                    "tool_use_id": block["id"],
+                    "content": [{"text": tool_output}],
                 }
             )
 
