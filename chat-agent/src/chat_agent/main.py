@@ -96,16 +96,23 @@ async def debug_sdk_info() -> dict:
             max_turns=1,
         )
         messages = []
+        stderr_lines = []
+        options.stderr = lambda line: stderr_lines.append(line)
+
         async def _run():
             async for msg in query(prompt="say hello", options=options):
+                entry = {"type": type(msg).__name__, "is_dict": isinstance(msg, dict)}
                 if isinstance(msg, dict):
-                    messages.append({"type": "dict", "keys": list(msg.keys()), "preview": str(msg)[:300]})
+                    entry["keys"] = list(msg.keys())
+                    entry["preview"] = str(msg)[:300]
                 else:
-                    messages.append({"type": type(msg).__name__, "repr": repr(msg)[:300]})
+                    entry["attrs"] = [a for a in dir(msg) if not a.startswith("_")]
+                    entry["repr"] = repr(msg)[:300]
+                messages.append(entry)
         await asyncio.wait_for(_run(), timeout=15)
-        result = {"status": "ok", "messages": messages}
+        result = {"status": "ok", "messages": messages, "stderr": stderr_lines}
     except asyncio.TimeoutError:
-        result = {"status": "timeout_15s", "messages_so_far": [{"type": type(m).__name__} for m in messages]}
+        result = {"status": "timeout_15s", "messages_so_far": messages, "stderr": stderr_lines}
     except Exception as e:
         result = {"status": "error", "error": str(e)}
 
