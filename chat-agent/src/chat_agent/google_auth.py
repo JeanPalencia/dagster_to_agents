@@ -8,6 +8,7 @@ Docs: https://developers.google.com/chat/how-tos/authorize-chat-app
 """
 from __future__ import annotations
 
+import logging
 import os
 
 from fastapi import HTTPException, Request
@@ -15,6 +16,8 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 
 from chat_agent.config import GOOGLE_CHAT_PROJECT_NUMBER
+
+logger = logging.getLogger(__name__)
 
 # Expected audience: the GCP project number
 # Google Chat sets aud = project number (as string)
@@ -51,10 +54,13 @@ async def verify_google_chat_token(request: Request) -> None:
             certs_url=_CHAT_CERTS_URL,
         )
     except Exception as exc:
+        logger.error("JWT verification failed — audience=%s error=%s", GOOGLE_CHAT_PROJECT_NUMBER, exc)
         raise HTTPException(status_code=401, detail=f"Invalid token: {exc}") from exc
 
     if claims.get("iss") != _CHAT_ISSUER:
+        logger.error("Wrong issuer — expected=%s got=%s", _CHAT_ISSUER, claims.get("iss"))
         raise HTTPException(
             status_code=401,
             detail=f"Unexpected issuer: {claims.get('iss')}",
         )
+    logger.info("JWT verified OK — iss=%s aud=%s", claims.get("iss"), claims.get("aud"))
