@@ -22,11 +22,8 @@ logger = logging.getLogger(__name__)
 # Expected audience: the GCP project number
 # Google Chat sets aud = project number (as string)
 _CHAT_ISSUER = "chat@system.gserviceaccount.com"
-# Google Chat tokens are signed by its own service account, not standard OAuth2 keys.
-_CHAT_CERTS_URL = (
-    "https://www.googleapis.com/service_accounts/v1/metadata/x509/"
-    "chat@system.gserviceaccount.com"
-)
+# Google Chat tokens are signed with Google's standard OAuth2 keys (not Chat's own SA keys).
+# The iss claim identifies the sender as Chat, but key lookup uses the standard certs URL.
 
 
 async def verify_google_chat_token(request: Request) -> None:
@@ -51,7 +48,6 @@ async def verify_google_chat_token(request: Request) -> None:
             token,
             google_requests.Request(),
             audience=GOOGLE_CHAT_PROJECT_NUMBER,
-            certs_url=_CHAT_CERTS_URL,
         )
     except Exception as exc:
         logger.error("JWT verification failed — audience=%s error=%s", GOOGLE_CHAT_PROJECT_NUMBER, exc)
