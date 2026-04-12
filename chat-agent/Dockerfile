@@ -3,25 +3,14 @@ FROM python:3.12-slim
 # Install curl
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# Install Node.js (required for Claude Code CLI)
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
-    && apt-get install -y nodejs \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Claude Code CLI globally
-RUN npm install -g @anthropic-ai/claude-code
-
-# Install UV and make it globally available
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    cp /root/.local/bin/uv /usr/local/bin/uv && \
-    cp /root/.local/bin/uvx /usr/local/bin/uvx
+# Install UV
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && \
     mkdir -p /app && \
-    chown -R appuser:appuser /app && \
-    mkdir -p /home/appuser/.claude && \
-    chown -R appuser:appuser /home/appuser/.claude
+    chown -R appuser:appuser /app
 
 WORKDIR /app
 

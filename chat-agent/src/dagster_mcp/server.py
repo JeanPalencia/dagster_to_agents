@@ -1,113 +1,94 @@
 """
-Dagster MCP Server - exposes 4 Dagster tools via MCP stdio protocol.
+Dagster tools for Claude Agent SDK.
 
-Tools:
-- list_jobs: List available Dagster jobs
-- launch_job: Launch a job by name
-- get_run_status: Get status of a run by ID
-- get_recent_runs: Get recent runs with status
-
-This server reuses the existing tool implementations from chat_agent.tools.
+Exposes 4 Dagster tools using the @tool decorator pattern.
+These run in-process (no separate MCP server needed).
 """
 from __future__ import annotations
 
 import json
-from typing import Any
 
-from mcp.server import Server
-from mcp.server.stdio import stdio_server
-from mcp.types import TextContent, Tool
+from claude_agent_sdk import create_sdk_mcp_server, tool
 
 from chat_agent import tools
 
-# Create the MCP server instance
-server = Server("dagster")
+
+@tool(
+    "list_jobs",
+    "List all available Dagster jobs with their descriptions.",
+    {},  # No input parameters
+)
+async def list_jobs_tool(args: dict) -> dict:
+    """List available Dagster jobs."""
+    result = tools.list_jobs()
+    return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
 
 
-@server.list_tools()
-async def list_tools() -> list[Tool]:
-    """Return the list of available tools."""
-    return [
-        Tool(
-            name="list_jobs",
-            description="List all available Dagster jobs with their descriptions.",
-            inputSchema={
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
-        ),
-        Tool(
-            name="launch_job",
-            description="Launch a Dagster job by name. Returns run_id and a URL to track the run.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "job_name": {
-                        "type": "string",
-                        "description": "The exact job name (e.g. amenity_desc_consistency_job)",
-                    }
-                },
-                "required": ["job_name"],
-            },
-        ),
-        Tool(
-            name="get_run_status",
-            description="Get the current status of a Dagster run by run_id.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "run_id": {
-                        "type": "string",
-                        "description": "The Dagster run ID (UUID)",
-                    }
-                },
-                "required": ["run_id"],
-            },
-        ),
-        Tool(
-            name="get_recent_runs",
-            description="Get recent Dagster runs with their status.",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "limit": {
-                        "type": "integer",
-                        "description": "Number of recent runs to return (default: 5)",
-                        "default": 5,
-                    }
-                },
-                "required": [],
-            },
-        ),
-    ]
+@tool(
+    "launch_job",
+    "Launch a Dagster job by name. Returns run_id and a URL to track the run.",
+    {
+        "type": "object",
+        "properties": {
+            "job_name": {
+                "type": "string",
+                "description": "The exact job name (e.g. amenity_desc_consistency_job)",
+            }
+        },
+        "required": ["job_name"],
+    },
+)
+async def launch_job_tool(args: dict) -> dict:
+    """Launch a Dagster job."""
+    result = await tools.launch_job(args["job_name"])
+    return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
 
 
-@server.call_tool()
-async def call_tool(name: str, arguments: Any) -> list[TextContent]:
-    """Handle tool calls by dispatching to the appropriate function."""
-    if name == "list_jobs":
-        result = tools.list_jobs()
-    elif name == "launch_job":
-        result = await tools.launch_job(arguments["job_name"])
-    elif name == "get_run_status":
-        result = await tools.get_run_status(arguments["run_id"])
-    elif name == "get_recent_runs":
-        limit = arguments.get("limit", 5)
-        result = await tools.get_recent_runs(limit)
-    else:
-        result = {"error": f"Unknown tool: {name}"}
-
-    # Return result as formatted JSON text
-    return [TextContent(type="text", text=json.dumps(result, indent=2))]
-
-
-async def main():
-    """Run the MCP server via stdio."""
-    async with stdio_server() as (read_stream, write_stream):
-        await server.run(read_stream, write_stream, server.create_initialization_options())
+@tool(
+    "get_run_status",
+    "Get the current status of a Dagster run by run_id.",
+    {
+        "type": "object",
+        "properties": {
+            "run_id": {
+                "type": "string",
+                "description": "The Dagster run ID (UUID)",
+            }
+        },
+        "required": ["run_id"],
+    },
+)
+async def get_run_status_tool(args: dict) -> dict:
+    """Get Dagster run status."""
+    result = await tools.get_run_status(args["run_id"])
+    return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
 
 
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+@tool(
+    "get_recent_runs",
+    "Get recent Dagster runs with their status.",
+    {
+        "type": "object",
+        "properties": {
+            "limit": {
+                "type": "integer",
+                "description": "Number of recent runs to return (default: 5)",
+                "default": 5,
+            }
+        },
+        "required": [],
+    },
+)
+async def get_recent_runs_tool(args: dict) -> dict:
+    """Get recent Dagster runs."""
+    limit = args.get("limit", 5)
+    result = await tools.get_recent_runs(limit)
+    return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+
+
+# Create the MCP server with all 4 tools
+dagster_server = create_sdk_mcp_server(
+    name="dagster",
+    version="1.0.0",
+    tools=[list_jobs_tool, launch_job_tool, get_run_status_tool, get_recent_runs_tool],
+)

@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "dagster": {
-      "command": "/app/.venv/bin/python",
-      "args": ["-m", "dagster_mcp"],
-      "cwd": "/app"
-    }
-  }
-}
