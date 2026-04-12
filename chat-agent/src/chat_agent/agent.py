@@ -99,7 +99,7 @@ async def run_agent(user_message: str) -> str:
     Returns the final text response.
     """
     client = boto3.client("bedrock-runtime", region_name="us-east-1")
-    messages = [{"role": "user", "content": [{"text": user_message}]}]
+    messages = [{"role": "user", "content": [{"type": "text", "text": user_message}]}]
 
     for _ in range(_MAX_ITERATIONS):
         # Bedrock Messages API format
