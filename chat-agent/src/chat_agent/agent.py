@@ -106,7 +106,7 @@ async def run_agent(user_message: str) -> str:
         request_body = {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": 1024,
-            "system": [{"text": _SYSTEM_PROMPT}],
+            "system": [{"type": "text", "text": _SYSTEM_PROMPT}],
             "messages": messages,
             "tools": _TOOL_DEFS,
         }
