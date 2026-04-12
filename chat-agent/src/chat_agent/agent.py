@@ -141,7 +141,7 @@ async def run_agent(user_message: str) -> str:
                 {
                     "type": "tool_result",
                     "tool_use_id": block["id"],
-                    "content": [{"text": tool_output}],
+                    "content": [{"type": "text", "text": tool_output}],
                 }
             )
 
