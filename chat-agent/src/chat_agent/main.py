@@ -71,54 +71,6 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
-@app.get("/debug/sdk-info")
-async def debug_sdk_info() -> dict:
-    """Inspect ClaudeAgentOptions fields and test SDK."""
-    import asyncio
-    import inspect
-    import os
-    from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
-
-    # 1. Show ClaudeAgentOptions signature
-    sig = str(inspect.signature(ClaudeAgentOptions.__init__))
-
-    # 2. Try a minimal SDK call (no MCP, no tools) with 10s timeout
-    result = None
-    try:
-        options = ClaudeAgentOptions(
-            env={
-                "CLAUDE_CODE_USE_BEDROCK": "1",
-                "AWS_ACCESS_KEY_ID": os.environ.get("AWS_ACCESS_KEY_ID", ""),
-                "AWS_SECRET_ACCESS_KEY": os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
-                "AWS_SESSION_TOKEN": os.environ.get("AWS_SESSION_TOKEN", ""),
-                "AWS_DEFAULT_REGION": os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
-            },
-            max_turns=1,
-        )
-        messages = []
-        stderr_lines = []
-        options.stderr = lambda line: stderr_lines.append(line)
-
-        async def _run():
-            async for msg in query(prompt="say hello", options=options):
-                entry = {"type": type(msg).__name__, "is_dict": isinstance(msg, dict)}
-                if isinstance(msg, dict):
-                    entry["keys"] = list(msg.keys())
-                    entry["preview"] = str(msg)[:300]
-                else:
-                    entry["attrs"] = [a for a in dir(msg) if not a.startswith("_")]
-                    entry["repr"] = repr(msg)[:300]
-                messages.append(entry)
-        await asyncio.wait_for(_run(), timeout=15)
-        result = {"status": "ok", "messages": messages, "stderr": stderr_lines}
-    except asyncio.TimeoutError:
-        result = {"status": "timeout_15s", "messages_so_far": messages, "stderr": stderr_lines}
-    except Exception as e:
-        result = {"status": "error", "error": str(e)}
-
-    return {"signature": sig, "sdk_test": result}
-
-
 @app.post(
     "/chat/webhook",
     dependencies=[Depends(verify_google_chat_token)],
