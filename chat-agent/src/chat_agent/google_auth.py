@@ -15,7 +15,7 @@ from fastapi import HTTPException, Request
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 
-from chat_agent.config import GOOGLE_CHAT_PROJECT_NUMBER
+from chat_agent.config import GOOGLE_CHAT_AUDIENCE
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ async def verify_google_chat_token(request: Request) -> None:
 
     Set GOOGLE_CHAT_PROJECT_NUMBER="" to skip verification (dev/testing only).
     """
-    if not GOOGLE_CHAT_PROJECT_NUMBER:
+    if not GOOGLE_CHAT_AUDIENCE:
         # Verification disabled — only safe for local testing
         return
 
@@ -47,10 +47,10 @@ async def verify_google_chat_token(request: Request) -> None:
         claims = id_token.verify_token(
             token,
             google_requests.Request(),
-            audience=GOOGLE_CHAT_PROJECT_NUMBER,
+            audience=GOOGLE_CHAT_AUDIENCE,
         )
     except Exception as exc:
-        logger.error("JWT verification failed — audience=%s error=%s", GOOGLE_CHAT_PROJECT_NUMBER, exc)
+        logger.error("JWT verification failed — audience=%s error=%s", GOOGLE_CHAT_AUDIENCE, exc)
         raise HTTPException(status_code=401, detail=f"Invalid token: {exc}") from exc
 
     if claims.get("iss") != _CHAT_ISSUER:

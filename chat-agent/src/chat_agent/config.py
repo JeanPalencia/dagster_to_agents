@@ -10,9 +10,14 @@ DAGSTER_GRAPHQL_URL: str = os.environ.get(
     "https://dagstertoagents-production.up.railway.app/graphql",
 )
 
-# GCP project number for verifying Google Chat JWT tokens.
-# Find it in GCP Console → IAM & Admin → Settings.
-GOOGLE_CHAT_PROJECT_NUMBER: str = os.environ.get("GOOGLE_CHAT_PROJECT_NUMBER", "")
+# JWT audience for verifying Google Chat tokens.
+# For HTTP endpoint apps, Google Chat sets aud = the webhook URL (not the project number).
+# Set to the full webhook URL: https://<your-domain>/chat/webhook
+# Leave empty to skip verification (local dev only).
+GOOGLE_CHAT_AUDIENCE: str = os.environ.get(
+    "GOOGLE_CHAT_AUDIENCE",
+    os.environ.get("GOOGLE_CHAT_PROJECT_NUMBER", ""),  # backwards compat
+)
 
 # --- Dagster repo coordinates (match Railway deployment) ---
 REPO_LOCATION = "dagster_pipeline.definitions"
