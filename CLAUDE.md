@@ -131,9 +131,26 @@ chat-agent/
 
 ### Arquitectura del agente
 
-El agente usa `claude_agent_sdk.query()` con un `McpSdkServerConfig` in-process. Los tools de Dagster corren dentro del mismo proceso Python (no hay servidor stdio separado). El SDK usa el CLI de Claude Code bundled internamente — las credenciales de Bedrock se pasan via `ClaudeAgentOptions(env={...})` porque el subprocess NO hereda las env vars del proceso padre.
+El agente usa `claude_agent_sdk.query()`. Los tools de Dagster corren in-process (`McpSdkServerConfig`). Engram corre como subprocess stdio (`McpStdioServerConfig`). El SDK usa el CLI de Claude Code bundled internamente — las credenciales de Bedrock se pasan via `ClaudeAgentOptions(env={...})` porque el subprocess NO hereda las env vars del proceso padre.
 
 Las sesiones se trackean en memoria por `space.name` de Google Chat (se pierden en redeploy — aceptable).
+
+### Agregar una nueva capability
+
+Agregar una entrada a `_MCP_REGISTRY` en `chat-agent/src/chat_agent/agent.py`:
+
+```python
+"my_server": {
+    "server": McpStdioServerConfig(command="...", args=["..."]),
+    "tools": ["mcp__my_server__tool_a", "mcp__my_server__tool_b"],
+    "internal": False,  # True = el agente la usa pero no la expone al usuario
+},
+```
+
+`internal=False` → aparece en el system prompt como capacidad del agente (el usuario puede preguntar por ella).
+`internal=True` → el agente la usa internamente (ej: engram para memoria), no se expone al usuario.
+
+`allowed_tools`, `mcp_servers` y el system prompt se derivan automáticamente del registry — no hay que editar nada más.
 
 ### Deploy en Railway
 
@@ -168,7 +185,7 @@ Las sesiones se trackean en memoria por `space.name` de Google Chat (se pierden 
 
 ### Agregar un nuevo job al agente
 
-Editar `chat-agent/src/chat_agent/config.py` → `JOB_REGISTRY`:
+Editar `chat-agent/src/chat_agent/config.py` → `JOB_REGISTRY` (también actualiza las respuestas del agente sobre jobs disponibles):
 ```python
 "new_job_name": {
     "description": "What this job does",
