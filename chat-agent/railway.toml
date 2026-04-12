@@ -1,6 +1,6 @@
 [build]
 builder = "DOCKERFILE"
-dockerfilePath = "../Dockerfile.chat-agent"
+dockerfilePath = "Dockerfile"
 
 [deploy]
 healthcheckPath = "/health"

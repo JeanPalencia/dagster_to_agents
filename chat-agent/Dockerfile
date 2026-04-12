@@ -1,7 +1,6 @@
 FROM python:3.12-slim
 
-# bust cache: 2026-04-12
-RUN apt-get update && apt-get install -y curl tar && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y curl tar git && rm -rf /var/lib/apt/lists/*
 
 # Install Engram binary (Linux x86_64)
 RUN curl -fsSL https://github.com/Gentleman-Programming/engram/releases/download/v1.12.0/engram_1.12.0_linux_amd64.tar.gz \
@@ -21,8 +20,19 @@ RUN useradd -m -u 1000 appuser && \
 
 WORKDIR /app
 
-# Copy and install as root, then chown
+# Copy chat-agent source
 COPY . .
+
+# Download dagster-pipeline and .claude from GitHub (sparse, no full clone)
+ARG GITHUB_REPO=JeanPalencia/dagster_to_agents
+ARG GITHUB_BRANCH=main
+RUN git clone --depth 1 --filter=blob:none --sparse \
+      https://github.com/${GITHUB_REPO}.git /tmp/repo && \
+    cd /tmp/repo && \
+    git sparse-checkout set dagster-pipeline .claude && \
+    cp -r dagster-pipeline /app/dagster-pipeline && \
+    cp -r .claude /app/.claude && \
+    rm -rf /tmp/repo
 RUN uv sync && chown -R appuser:appuser /app
 
 ENV PATH="/app/.venv/bin:$PATH"
