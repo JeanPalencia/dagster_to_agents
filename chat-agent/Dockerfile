@@ -1,6 +1,6 @@
 FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y curl tar git su-exec && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y curl tar git gosu && rm -rf /var/lib/apt/lists/*
 
 # Install Engram binary (Linux x86_64)
 RUN curl -fsSL https://github.com/Gentleman-Programming/engram/releases/download/v1.12.0/engram_1.12.0_linux_amd64.tar.gz \
@@ -38,4 +38,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 EXPOSE 8000
 
 # Run as root briefly to fix Volume permissions, then drop to appuser
-CMD ["sh", "-c", "mkdir -p /data/.engram && chown -R appuser:appuser /data && exec su-exec appuser uvicorn chat_agent.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "mkdir -p /data/.engram && chown -R appuser:appuser /data && exec gosu appuser uvicorn chat_agent.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
