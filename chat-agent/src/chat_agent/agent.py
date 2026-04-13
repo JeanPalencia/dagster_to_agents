@@ -121,10 +121,13 @@ async def run_agent(user_message: str, session_id: str | None = None) -> tuple[s
         cwd="/app/repo",  # full repo clone — CLI reads .claude/agents/ and can git push
         env={
             "CLAUDE_CODE_USE_BEDROCK": "1",
+            "AWS_DEFAULT_REGION": os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+            # Bedrock API key (permanent, no expiry) — takes priority over IAM credentials
+            "AWS_BEARER_TOKEN_BEDROCK": os.environ.get("AWS_BEARER_TOKEN_BEDROCK", ""),
+            # IAM credentials fallback (STS temporary, expire every few hours)
             "AWS_ACCESS_KEY_ID": os.environ.get("AWS_ACCESS_KEY_ID", ""),
             "AWS_SECRET_ACCESS_KEY": os.environ.get("AWS_SECRET_ACCESS_KEY", ""),
             "AWS_SESSION_TOKEN": os.environ.get("AWS_SESSION_TOKEN", ""),
-            "AWS_DEFAULT_REGION": os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
             "ENGRAM_DATA_DIR": os.environ.get("ENGRAM_DATA_DIR", "/data/.engram"),
             "SPOT2_API_KEY": os.environ.get("SPOT2_API_KEY", ""),
         },
