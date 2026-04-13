@@ -158,7 +158,19 @@ async def debug_engram() -> dict:
     except Exception as e:
         rows = [{"error": str(e)}]
 
-    return {"db_exists": db_exists, "db_size_bytes": db_size, "recent_memories": rows}
+    # Also check /data permissions and engram binary
+    import shutil
+    data_writable = os.access("/data", os.W_OK)
+    engram_path = shutil.which("engram")
+
+    return {
+        "db_exists": db_exists,
+        "db_size_bytes": db_size,
+        "data_dir": data_dir,
+        "data_writable": data_writable,
+        "engram_binary": engram_path,
+        "recent_memories": rows,
+    }
 
 
 @app.post(
