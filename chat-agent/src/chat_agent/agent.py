@@ -33,7 +33,7 @@ from dagster_mcp.server import DAGSTER_TOOLS, dagster_server
 
 logger = logging.getLogger(__name__)
 
-_MAX_TURNS = 10
+_MAX_TURNS = 50
 
 # Central registry of all capabilities.
 # kind="mcp"      → MCP server with tools
