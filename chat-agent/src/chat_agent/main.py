@@ -135,6 +135,29 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/debug/engram")
+async def debug_engram() -> dict:
+    """Check Engram DB status and recent memories."""
+    import os, subprocess
+    data_dir = os.environ.get("ENGRAM_DATA_DIR", "/data/.engram")
+    db_path = f"{data_dir}/engram.db"
+    db_exists = os.path.exists(db_path)
+    db_size = os.path.getsize(db_path) if db_exists else 0
+
+    # Try querying engram via CLI
+    try:
+        result = subprocess.run(
+            ["engram", "search", "--project", "dagster-agent", "--query", "job", "--limit", "5"],
+            capture_output=True, text=True, timeout=5,
+            env={**os.environ, "ENGRAM_DATA_DIR": data_dir}
+        )
+        cli_output = result.stdout[:500] if result.stdout else result.stderr[:200]
+    except Exception as e:
+        cli_output = str(e)
+
+    return {"db_exists": db_exists, "db_size_bytes": db_size, "cli_output": cli_output}
+
+
 @app.post(
     "/chat/webhook",
     dependencies=[Depends(verify_google_chat_token)],
