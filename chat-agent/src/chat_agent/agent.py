@@ -63,10 +63,16 @@ _REGISTRY: dict[str, dict] = {
     },
     "spot2": {
         "kind": "mcp",
-        # spot2 server config is in .claude/settings.json (read by CLI via cwd=/app/repo)
-        # No server entry needed here — CLI discovers it automatically
-        "server": None,
-        "tools": [],  # tools are dynamic; allowed via mcp__spot2__* wildcard in allowed_tools
+        "server": McpStdioServerConfig(
+            command="npx",
+            args=[
+                "mcp-remote",
+                "https://mcp.ai.spot2.mx/mcp",
+                "--header",
+                f"Authorization: Bearer {os.environ.get('SPOT2_API_KEY', '')}",
+            ],
+        ),
+        "tools": [],  # dynamic tools allowed via mcp__spot2__* wildcard
         "description": (
             "Consultas a bases de datos (MySQL y PostgreSQL). "
             "Úsalo para verificar datos en tablas, validar resultados de jobs, "
