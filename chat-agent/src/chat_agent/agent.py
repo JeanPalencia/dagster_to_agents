@@ -61,6 +61,25 @@ _REGISTRY: dict[str, dict] = {
         ],
         "internal": True,
     },
+    "spot2": {
+        "kind": "mcp",
+        "server": McpStdioServerConfig(
+            command="npx",
+            args=[
+                "mcp-remote",
+                "https://mcp.ai.spot2.mx/mcp",
+                "--header",
+                f"Authorization: Bearer {os.environ.get('SPOT2_API_KEY', '')}",
+            ],
+        ),
+        "tools": ["mcp__spot2__*"],  # wildcard — spot2 exposes dynamic tools
+        "description": (
+            "Consultas a bases de datos (MySQL y PostgreSQL). "
+            "Úsalo para verificar datos en tablas, validar resultados de jobs, "
+            "consultar fuentes de datos o explorar schemas."
+        ),
+        "internal": False,
+    },
     "logic_modifier": {
         "kind": "subagent",
         "description": (
@@ -86,11 +105,17 @@ _ALLOWED_TOOLS = [
 
 # User-facing capabilities for system prompt
 _USER_CAPABILITIES = [
-    # MCP tools: strip mcp__<server>__ prefix
+    # MCP tools with description: show "name: description"
+    *(
+        f"{name}: {entry['description']}"
+        for name, entry in _REGISTRY.items()
+        if entry["kind"] == "mcp" and not entry["internal"] and "description" in entry
+    ),
+    # MCP tools without description: show individual tool names
     *(
         tool.split("__", 2)[-1]
         for entry in _REGISTRY.values()
-        if entry["kind"] == "mcp" and not entry["internal"]
+        if entry["kind"] == "mcp" and not entry["internal"] and "description" not in entry
         for tool in entry["tools"]
     ),
     # Sub-agents: show as "name: description"
