@@ -1,6 +1,7 @@
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
+watchPaths = ["chat-agent/**", "Dockerfile.chat-agent", ".claude/**"]
 
 [deploy]
 healthcheckPath = "/health"

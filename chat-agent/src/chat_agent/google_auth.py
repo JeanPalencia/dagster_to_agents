@@ -46,10 +46,14 @@ async def verify_google_chat_token(request: Request) -> None:
     Set GOOGLE_CHAT_AUDIENCE="" to skip verification (local dev only).
     """
     if not GOOGLE_CHAT_AUDIENCE:
+        logger.info("Skipping JWT verification (GOOGLE_CHAT_AUDIENCE not set)")
         return
 
     auth_header = request.headers.get("Authorization", "")
+    logger.info("Received Authorization header: %s", auth_header[:50] if auth_header else "MISSING")
+
     if not auth_header.startswith("Bearer "):
+        logger.error("Authorization header malformed or missing: %r", auth_header[:100] if auth_header else None)
         raise HTTPException(status_code=401, detail="Missing Bearer token")
 
     token = auth_header.removeprefix("Bearer ")
