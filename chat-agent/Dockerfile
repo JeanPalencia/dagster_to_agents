@@ -13,10 +13,10 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     cp /root/.local/bin/uvx /usr/local/bin/uvx && \
     chmod 755 /usr/local/bin/uv /usr/local/bin/uvx
 
-# Create non-root user
+# Create non-root user and volume mount point with correct permissions
 RUN useradd -m -u 1000 appuser && \
-    mkdir -p /app && \
-    chown -R appuser:appuser /app
+    mkdir -p /app /data && \
+    chown -R appuser:appuser /app /data
 
 WORKDIR /app
 
