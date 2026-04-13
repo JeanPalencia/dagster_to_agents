@@ -63,16 +63,10 @@ _REGISTRY: dict[str, dict] = {
     },
     "spot2": {
         "kind": "mcp",
-        "server": McpStdioServerConfig(
-            command="npx",
-            args=[
-                "mcp-remote",
-                "https://mcp.ai.spot2.mx/mcp",
-                "--header",
-                f"Authorization: Bearer {os.environ.get('SPOT2_API_KEY', '')}",
-            ],
-        ),
-        "tools": ["mcp__spot2__*"],  # wildcard — spot2 exposes dynamic tools
+        # spot2 server config is in .claude/settings.json (read by CLI via cwd=/app/repo)
+        # No server entry needed here — CLI discovers it automatically
+        "server": None,
+        "tools": [],  # tools are dynamic; allowed via mcp__spot2__* wildcard in allowed_tools
         "description": (
             "Consultas a bases de datos (MySQL y PostgreSQL). "
             "Úsalo para verificar datos en tablas, validar resultados de jobs, "
@@ -94,14 +88,14 @@ _REGISTRY: dict[str, dict] = {
 _MCP_SERVERS = {
     name: entry["server"]
     for name, entry in _REGISTRY.items()
-    if entry["kind"] == "mcp"
+    if entry["kind"] == "mcp" and entry.get("server") is not None
 }
 _ALLOWED_TOOLS = [
     tool
     for entry in _REGISTRY.values()
     if entry["kind"] == "mcp"
     for tool in entry["tools"]
-]
+] + ["mcp__spot2__*"]  # spot2 tools are dynamic — wildcard allows all of them
 
 # User-facing capabilities for system prompt
 _USER_CAPABILITIES = [
