@@ -59,7 +59,9 @@ except Exception as e:
 _sessions: dict[str, str] = {}
 
 # Google Chat API timeout before falling back to async response (seconds)
-_SYNC_TIMEOUT = 25
+# Keep well under Google Chat's 30s webhook timeout so "⏳ Analizando..."
+# arrives before the "no responde" placeholder appears.
+_SYNC_TIMEOUT = 5
 
 
 def _chat_response(text: str) -> dict:
