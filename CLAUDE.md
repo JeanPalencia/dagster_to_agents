@@ -115,13 +115,14 @@ Servicio FastAPI independiente desplegado en Railway como segundo servicio del p
 Recibe mensajes de Google Chat, los procesa con **Claude Agent SDK** via AWS Bedrock, y llama al GraphQL de Dagster.
 
 ```
+Dockerfile.chat-agent       # (raíz del repo) — clona repo completo a /app/repo/ durante build
 chat-agent/
     Dockerfile              # python:3.12-slim + uv + engram binary, non-root (appuser), puerto 8000
-    railway.toml            # builder=DOCKERFILE, healthcheck=/health
+    railway.toml            # builder=DOCKERFILE, healthcheck=/health, watchPaths=[chat-agent/**,...]
     pyproject.toml          # fastapi, uvicorn, claude-agent-sdk, httpx, google-auth
     src/chat_agent/
-        main.py             # POST /chat/webhook  +  GET /health (formato Google Workspace Add-on)
-        agent.py            # _MCP_REGISTRY → allowed_tools + mcp_servers + system prompt dinámico
+        main.py             # POST /chat/webhook + GET /health; respuesta async con service account
+        agent.py            # _REGISTRY (kind=mcp|subagent) → allowed_tools + mcp_servers + system prompt
         tools.py            # GraphQL: launch_job, get_run_status, get_recent_runs, list_jobs
         config.py           # Env vars + JOB_REGISTRY + build_system_prompt()
         google_auth.py      # Verifica JWT de Google Chat con audience = webhook URL
@@ -132,26 +133,43 @@ chat-agent/
 
 ### Arquitectura del agente
 
-El agente usa `claude_agent_sdk.query()`. Los tools de Dagster corren in-process (`McpSdkServerConfig`). Engram corre como subprocess stdio (`McpStdioServerConfig`). El SDK usa el CLI de Claude Code bundled internamente — las credenciales de Bedrock se pasan via `ClaudeAgentOptions(env={...})` porque el subprocess NO hereda las env vars del proceso padre.
+El agente usa `claude_agent_sdk.query()` con `cwd="/app/repo"` — el repo completo clonado durante el build. Esto permite que el sub-agente `logic_modifier` lea, modifique y haga push de cambios al código de `dagster-pipeline/`.
+
+- **Dagster tools**: in-process (`McpSdkServerConfig`)
+- **Engram**: subprocess stdio (`McpStdioServerConfig`), datos en Railway Volume `/data/.engram`
+- **Bedrock**: credenciales pasadas via `ClaudeAgentOptions(env={...})` — el subprocess NO hereda env vars del proceso padre
 
 Las sesiones se trackean en memoria por `space.name` de Google Chat (se pierden en redeploy — aceptable).
 
+**Respuesta async**: mensajes que tardan más de 5s reciben inmediatamente un "⏳ Analizando..." y el resultado llega vía Google Chat REST API (`POST /v1/{space}/messages`) usando la service account. Esto evita el placeholder "no responde" de Google Chat (timeout ~30s).
+
+**watchPaths**: el servicio `dagster-chat2` solo redesploy cuando cambian `chat-agent/**`, `Dockerfile.chat-agent`, o `.claude/**`. Commits del `logic_modifier` en `dagster-pipeline/` no triggean redeploy del chat-agent.
+
 ### Agregar una nueva capability
 
-Agregar una entrada a `_MCP_REGISTRY` en `chat-agent/src/chat_agent/agent.py`:
+Agregar una entrada a `_REGISTRY` en `chat-agent/src/chat_agent/agent.py`:
 
 ```python
+# MCP server con tools
 "my_server": {
+    "kind": "mcp",
     "server": McpStdioServerConfig(command="...", args=["..."]),
     "tools": ["mcp__my_server__tool_a", "mcp__my_server__tool_b"],
-    "internal": False,  # True = el agente la usa pero no la expone al usuario
+    "internal": False,
+},
+
+# Sub-agente de Claude Code (definido en .claude/agents/<name>.md)
+"my_agent": {
+    "kind": "subagent",
+    "description": "Qué hace este sub-agente (se muestra al usuario)",
+    "internal": False,
 },
 ```
 
-`internal=False` → aparece en el system prompt como capacidad del agente (el usuario puede preguntar por ella).
-`internal=True` → el agente la usa internamente (ej: engram para memoria), no se expone al usuario.
+`internal=False` → aparece en el system prompt (el usuario puede preguntar por ello).
+`internal=True` → el agente lo usa silenciosamente (ej: engram para memoria).
 
-`allowed_tools`, `mcp_servers` y el system prompt se derivan automáticamente del registry — no hay que editar nada más.
+`allowed_tools`, `mcp_servers` y el system prompt se derivan automáticamente — no hay que editar nada más.
 
 ### Deploy en Railway
 
@@ -169,9 +187,14 @@ Agregar una entrada a `_MCP_REGISTRY` en `chat-agent/src/chat_agent/agent.py`:
 | `DAGSTER_GRAPHQL_URL` | `https://dagstertoagents-production.up.railway.app/graphql` |
 | `GOOGLE_CHAT_AUDIENCE` | URL completa del webhook: `https://<domain>/chat/webhook` |
 | `ENGRAM_DATA_DIR` | `/data/.engram` (Railway Volume montado en `/data`) |
+| `GOOGLE_CHAT_SA_EMAIL` | Email de la service account para mensajes proactivos |
+| `GOOGLE_CHAT_SA_PRIVATE_KEY` | Private key de la service account (con `\n` literales) |
+| `GITHUB_TOKEN` | PAT con `repo` scope — para clonar el repo privado durante el build |
+| `SPOT2_API_KEY` | API key del MCP de spot2 (usado por `logic_modifier` para queries a DB) |
 
 4. Crear Railway Volume `dagster-chat2-volume` con mount path `/data` (para persistir Engram DB)
 5. Generar dominio público → usar como webhook URL en Google Chat API config
+6. Para la service account de Google Chat (mensajes proactivos): crear en Google Cloud Console → IAM → Service Accounts → sin rol de IAM → Keys → JSON. El `private_key` se sube con `\n` literales (Railway lo preserva correctamente).
 
 > **⚠️ Credenciales STS (ASIA\*)**: Si `AWS_ACCESS_KEY_ID` empieza con `ASIA`, son temporales y expiran.
 > Síntoma: el agente no responde (el SDK hace retries silenciosos con 403 authentication_failed).
@@ -229,15 +252,18 @@ Este proyecto tiene agentes especializados que se activan automáticamente segú
 
 ### logic_modifier
 
-**Cuándo se activa**: Cuando solicitas modificar cómo se calcula una columna existente en una tabla lakehouse (ej: "cambiar la forma en que se calcula X", "agregar prefijo a Y columna").
+**Cuándo se activa**: Cuando se pide modificar cómo se calcula una columna existente en una tabla lakehouse, tanto desde Claude Code local como desde el chat-agent de Google Chat.
 
 **Qué hace**:
 - Modifica lógica de columnas existentes en assets silver (STG o Core)
 - Preserva estructura de tabla (mismas columnas, mismo schema)
 - Sigue 100% `dagster-pipeline/ARCHITECTURE.md`
-- Ejecuta en worktree aislado para testing
-- Valida cambios con backfills antes de merge
+- Ejecuta en worktree aislado, hace commit y push a `main` cuando el usuario confirma
+
+**Acceso a datos**: Usa el MCP de spot2 (`https://mcp.ai.spot2.mx/mcp`) para queries a MySQL y PostgreSQL cuando necesita evaluar disponibilidad de datos (Phase 2).
 
 **Ubicación**: `.claude/agents/logic_modifier.md`
 
-**Uso**: Se invoca automáticamente - no es necesario llamarlo explícitamente.
+**Uso via Google Chat**: enviar un mensaje describiendo el cambio + "Tienes mi confirmación" para que proceda al commit. El agente corre async y notifica via proactive message cuando termina.
+
+**Nota**: el sub-agente opera en `/app/repo/` dentro del container, con git configurado como `Dagster Agent <dagster-agent@railway.app>` para los commits.
