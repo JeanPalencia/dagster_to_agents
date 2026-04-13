@@ -144,18 +144,21 @@ async def debug_engram() -> dict:
     db_exists = os.path.exists(db_path)
     db_size = os.path.getsize(db_path) if db_exists else 0
 
-    # Try querying engram via CLI
+    # Query DB directly via sqlite3
+    rows = []
     try:
-        result = subprocess.run(
-            ["engram", "search", "--project", "dagster-agent", "--query", "job", "--limit", "5"],
-            capture_output=True, text=True, timeout=5,
-            env={**os.environ, "ENGRAM_DATA_DIR": data_dir}
-        )
-        cli_output = result.stdout[:500] if result.stdout else result.stderr[:200]
+        import sqlite3
+        if db_exists:
+            con = sqlite3.connect(db_path)
+            cur = con.execute(
+                "SELECT id, title, type, created_at, substr(content, 1, 150) FROM observations ORDER BY created_at DESC LIMIT 10"
+            )
+            rows = [{"id": r[0], "title": r[1], "type": r[2], "created_at": r[3], "content_preview": r[4]} for r in cur.fetchall()]
+            con.close()
     except Exception as e:
-        cli_output = str(e)
+        rows = [{"error": str(e)}]
 
-    return {"db_exists": db_exists, "db_size_bytes": db_size, "cli_output": cli_output}
+    return {"db_exists": db_exists, "db_size_bytes": db_size, "recent_memories": rows}
 
 
 @app.post(
