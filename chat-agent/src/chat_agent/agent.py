@@ -139,7 +139,8 @@ async def run_agent(user_message: str, session_id: str | None = None) -> tuple[s
     options = ClaudeAgentOptions(
         system_prompt=_SYSTEM_PROMPT,
         mcp_servers=_MCP_SERVERS,
-        allowed_tools=_ALLOWED_TOOLS,
+        # bypassPermissions approves all tools automatically.
+        # allowed_tools is NOT passed — it acts as exclusive whitelist and blocks dynamic tools.
         permission_mode="bypassPermissions",
         max_turns=_MAX_TURNS,
         resume=session_id,
