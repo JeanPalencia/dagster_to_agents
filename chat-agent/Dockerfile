@@ -2,6 +2,14 @@ FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y curl tar git gosu && rm -rf /var/lib/apt/lists/*
 
+# Install Node.js (required for mcp-remote)
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install mcp-remote globally so npx finds it instantly (no download on each call)
+RUN npm install -g mcp-remote
+
 # Install Engram binary (Linux x86_64)
 RUN curl -fsSL https://github.com/Gentleman-Programming/engram/releases/download/v1.12.0/engram_1.12.0_linux_amd64.tar.gz \
     | tar -xz -C /usr/local/bin engram && \
