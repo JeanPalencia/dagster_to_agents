@@ -96,6 +96,15 @@ _REGISTRY: dict[str, dict] = {
         ),
         "internal": True,  # Triggered by GitHub Actions, not user-facing
     },
+    "reviewer": {
+        "kind": "subagent",
+        "description": (
+            "Revisión exhaustiva de PRs de cambios lakehouse contra ARCHITECTURE.md. "
+            "Evalúa 12 reglas arquitecturales, valida lógica con datos reales y postea "
+            "review en GitHub con nivel de confianza (APPROVE o REQUEST_CHANGES)."
+        ),
+        "internal": True,  # Triggered by GitHub Actions, not user-facing
+    },
 }
 
 # Derived from registry — don't edit manually

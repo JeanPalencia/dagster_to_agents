@@ -320,6 +320,127 @@ Use the test_specialist sub-agent (you are already in worktree isolation on the 
         )
 
 
+@app.post("/agent/review")
+async def agent_review(request: Request) -> JSONResponse:
+    """
+    Reviewer endpoint - exhaustive PR review against ARCHITECTURE.md.
+
+    Called by GitHub Actions after test specialist passes.
+    Posts a structured GitHub review (APPROVE or REQUEST_CHANGES) with confidence level.
+    """
+    _verify_agent_secret(request)
+
+    body: dict = await request.json()
+    pr_number = body.get("pr_number")
+    flow_name = body.get("flow_name")
+    test_results = body.get("test_results", "not available")
+
+    if not pr_number or not flow_name:
+        return JSONResponse(
+            {"error": "Missing required fields: pr_number, flow_name"},
+            status_code=400,
+        )
+
+    logger.info("Review request for PR #%s (flow: %s)", pr_number, flow_name)
+
+    prompt = f"""Review PR #{pr_number} for the {flow_name} flow.
+
+Test specialist results:
+{test_results}
+
+Tasks:
+1. Read the full PR diff via gh CLI
+2. Read dagster-pipeline/ARCHITECTURE.md (all 12 design rules)
+3. Read the modified files completely
+4. Evaluate compliance against each of the 12 rules
+5. Assess logic correctness and edge cases
+6. Use spot2 MCP to query gold output data if needed to validate business logic
+7. Determine confidence (HIGH/MEDIUM/LOW) and decision (APPROVE/REQUEST_CHANGES)
+8. Post review to GitHub via gh api
+9. Add appropriate labels (review/approved or review/changes-requested, confidence/*)
+
+Use the reviewer sub-agent.
+"""
+
+    try:
+        result_text, _ = await run_agent(prompt, session_id=None)
+        logger.info("Reviewer completed for PR #%s", pr_number)
+
+        return JSONResponse({
+            "status": "completed",
+            "pr_number": pr_number,
+            "message": "Reviewer executed",
+            "result_preview": result_text[:500] if result_text else "No output",
+        })
+
+    except Exception as exc:
+        logger.exception("Error running reviewer: %s", exc)
+        return JSONResponse(
+            {"status": "error", "pr_number": pr_number, "error": str(exc)},
+            status_code=500,
+        )
+
+
+@app.post("/agent/iterate")
+async def agent_iterate(request: Request) -> JSONResponse:
+    """
+    Iteration endpoint - triggers logic_modifier to fix issues on an existing PR.
+
+    Called by GitHub Actions when tests fail or reviewer rejects.
+    """
+    _verify_agent_secret(request)
+
+    body: dict = await request.json()
+    pr_number = body.get("pr_number")
+    branch = body.get("branch")
+    feedback = body.get("feedback", "")
+    iteration = body.get("iteration", 2)
+
+    if not pr_number or not branch:
+        return JSONResponse(
+            {"error": "Missing required fields: pr_number, branch"},
+            status_code=400,
+        )
+
+    logger.info("Iterate request for PR #%s (iteration %s)", pr_number, iteration)
+
+    prompt = f"""Fix the issues on PR #{pr_number} (iteration {iteration}/3).
+
+Branch: {branch}
+Feedback from previous attempt:
+{feedback}
+
+Tasks:
+1. Read the feedback above carefully
+2. Check out branch {branch} (already in worktree isolation)
+3. Fix the specific issues mentioned in the feedback
+4. Run the test harness again to verify fixes
+5. Push new commits to the same branch (do NOT create a new PR)
+6. Post a comment on PR #{pr_number} explaining what was fixed
+
+Use the logic_modifier sub-agent with the iteration context.
+"""
+
+    try:
+        result_text, _ = await run_agent(prompt, session_id=None)
+        logger.info("Iteration %s completed for PR #%s", iteration, pr_number)
+
+        return JSONResponse({
+            "status": "completed",
+            "pr_number": pr_number,
+            "iteration": iteration,
+            "message": "Iteration executed",
+            "result_preview": result_text[:500] if result_text else "No output",
+        })
+
+    except Exception as exc:
+        logger.exception("Error running iteration: %s", exc)
+        return JSONResponse(
+            {"status": "error", "pr_number": pr_number, "error": str(exc)},
+            status_code=500,
+        )
+
+
 @app.post(
     "/chat/webhook",
     dependencies=[Depends(verify_google_chat_token)],
