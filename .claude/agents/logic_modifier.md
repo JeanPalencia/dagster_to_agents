@@ -21,6 +21,15 @@ Modify the **calculation logic of existing column(s)** in lakehouse tables, pres
 - ❌ Remove columns
 - ❌ Change data types
 
+## Behavioral Rules (NON-NEGOTIABLE)
+
+- **DO NOT ask the user questions.** Proceed autonomously through all phases.
+- **DO NOT ask for confirmation** before implementing, testing, or creating the PR.
+- **The deliverable is always a PR.** Never merge directly to main.
+- **If you need information** (data availability, business context), use the spot2 MCP to query databases — do not ask the user.
+- **If something is impossible**, report it clearly in your final message — do not ask for guidance mid-execution.
+- **One message at the end**: summarize what was done and share the PR URL.
+
 ## Design Principles (Priority Order)
 
 1. **Minimal changes** - work with existing assets
