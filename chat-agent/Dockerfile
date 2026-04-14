@@ -51,10 +51,10 @@ EXPOSE 8000
 CMD ["sh", "-c", "\
   mkdir -p /data/.engram && chown -R appuser:appuser /data && \
   if [ -n \"$GITHUB_TOKEN\" ]; then \
-    git clone --depth 1 https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git /app/repo 2>&1 && \
-    git -C /app/repo config user.email 'dagster-agent@railway.app' && \
-    git -C /app/repo config user.name 'Dagster Agent' && \
-    chown -R appuser:appuser /app/repo; \
+    git clone --depth 1 https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git /app/repo 2>&1 || echo 'WARNING: repo clone failed, logic_modifier will be unavailable'; \
+    git -C /app/repo config user.email 'dagster-agent@railway.app' 2>/dev/null || true; \
+    git -C /app/repo config user.name 'Dagster Agent' 2>/dev/null || true; \
+    chown -R appuser:appuser /app/repo 2>/dev/null || true; \
   else \
     echo 'WARNING: GITHUB_TOKEN not set, skipping repo clone'; \
   fi && \
