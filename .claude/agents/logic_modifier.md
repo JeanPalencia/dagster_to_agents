@@ -438,117 +438,95 @@ Add entry in `dagster-pipeline/README.md` "Recent Changes" section:
 - `Write` to create new assets (if needed)
 - `Read` to verify code before modifying
 
+#### 6.6. Run Test Harness (MANDATORY)
+
+**After all code changes**, run the test harness from the worktree to validate against real data:
+
+```bash
+cd dagster-pipeline
+uv run python -m tests.test_harness --flow={flow_name}
+```
+
+**Example for amenity_description_consistency:**
+```bash
+uv run python -m tests.test_harness --flow=amenity_description_consistency
+```
+
+**The harness will**:
+- Materialize Bronze → STG → Core → Gold via `dg.materialize()` against real databases
+- Validate schema preservation (columns match expected)
+- Check for null regressions
+- Verify row count is reasonable
+- Confirm audit fields are present
+
+**If harness fails**:
+- Read the error output (JSON format)
+- Identify which validation failed
+- Fix the code
+- Re-run the harness
+- **Maximum 3 attempts**
+
 **Output**:
 - Modified/created code
 - Complete documentation
-- Branch ready for testing
+- ✅ Test harness passed (real data validation)
+- Branch ready for PR creation
 
 ---
 
 ### PHASE 7: Test and Verify
 
-**Objective**: Validate that change works correctly
+**Objective**: Ensure test harness passed + design flow-specific assertions
 
-#### 7.1. Test Backfill
+**NOTE**: The test harness in Phase 6.6 already runs `dg.materialize()` with real data.
+Phase 7 is for **additional flow-specific validation** if needed.
 
-**Strategy**: Execute 1 small partition (latest available date)
+#### 7.1. Review Test Harness Output
 
-**Commands** (execute according to flow):
+Confirm that the test harness from Phase 6.6 **passed all checks**:
+- ✅ Materialization successful
+- ✅ Schema preserved (columns match expected)
+- ✅ No null regressions
+- ✅ Row count reasonable
+- ✅ Audit fields present
 
+If any check failed, you already iterated in Phase 6.6 (max 3 attempts).
+
+#### 7.2. Optional: Flow-Specific Assertions
+
+If the change warrants additional validation beyond the standard checks, add flow-specific assertions via `--extra-checks`:
+
+**Example for spot_state_transitions** (verify sstd_ids are unique):
 ```bash
-# For data_lakehouse (partitioned)
-# 1. Bronze (if modified)
-dagster asset materialize -m dagster_pipeline.defs -s raw_{table}_new -p {date}
-
-# 2. Silver (modified)
-dagster asset materialize -m dagster_pipeline.defs -s stg_{table}_new -p {date}
-
-# 3. Gold (depends on silver)
-dagster asset materialize -m dagster_pipeline.defs -s {table}_new -p {date}
+uv run python -m tests.test_harness \
+  --flow=spot_state_transitions \
+  --extra-checks='{"check_sstd_unique": true}'
 ```
 
-**Tools**:
-- `Bash` to execute Dagster CLI commands
-- Capture logs and errors
-
-#### 7.2. Validations
-
-**Execute Python validations** (create temporary script):
-
-```python
-# /tmp/validate_logic_change.py
-import polars as pl
-from dagster_pipeline.resources.s3.lakehouse_ops import read_gold_from_s3
-
-# Read before/after data
-df_before = read_gold_from_s3("{table}_new", "2026-04-09")
-df_after = read_gold_from_s3("{table}_new", "2026-04-10")
-
-# Validation 1: Schema preserved
-assert df_before.columns == df_after.columns, "Schema changed!"
-assert df_before.dtypes == df_after.dtypes, "Dtypes changed!"
-print("✅ Schema preserved")
-
-# Validation 2: Row count (tolerance 5%)
-before_rows = df_before.height
-after_rows = df_after.height
-diff_pct = abs(after_rows - before_rows) / before_rows * 100
-assert diff_pct < 5.0, f"Row count diff {diff_pct:.1f}% > 5%"
-print(f"✅ Row count OK: {after_rows} rows (diff {diff_pct:.2f}%)")
-
-# Validation 3: Null counts (no regressions)
-null_before = df_before["{column}"].null_count()
-null_after = df_after["{column}"].null_count()
-assert null_after <= null_before, f"More nulls after: {null_after} vs {null_before}"
-print(f"✅ Null count OK: {null_after} nulls")
-
-print("\n✅ All validations passed")
-```
-
-**Execute**:
+**Example for amenity_description_consistency** (verify mention_rate calculation):
 ```bash
-python /tmp/validate_logic_change.py
+# Use spot2 MCP to query the actual gold output and verify logic
+# (This would be done via interactive exploration, not harness)
 ```
 
-#### 7.3. Iteration on Failure
-
-**If test fails** (maximum 3 attempts):
-
-1. Inspect failure cause
-   - Read Dagster logs
-   - Read error traces
-   - Identify root cause
-
-2. Fix code
-   - **GOTO Phase 6.1** (modify code)
-   - Apply fix
-
-3. Re-run tests
-   - **GOTO Phase 7.1**
-
-4. Iterate until ALL tests pass
-
-**If unresolvable failure** (after 3 attempts):
-- Report to user
-- Wait for decision: redesign completely? rollback?
+These extra checks are **optional** and only needed if the standard validations don't cover the specific logic change.
 
 **Output**:
-- ✅ All tests passed
-- Successful backfill logs
-- Confirmed validations
-- Validation script saved in `/tmp/`
+- ✅ Test harness passed with real data
+- ✅ Flow-specific assertions passed (if applicable)
+- Ready for PR creation
 
 ---
 
-### PHASE 8: Finalize
+### PHASE 8: Create Pull Request
 
-**Objective**: Merge or rollback according to result
+**Objective**: Create a PR for review (NEVER merge directly to main)
 
-#### 8.1. If All OK → Prepare for Merge
+#### 8.1. If All Tests Passed → Create PR
 
-**IMPORTANT**: DO NOT auto-merge. Present to user for review.
+**CRITICAL**: Changes to `main` ALWAYS go through PRs. NO direct `git merge`.
 
-**Actions**:
+**Actions from the worktree**:
 
 1. **Review changes**:
 ```bash
@@ -558,26 +536,94 @@ git diff main
 2. **Stage changes**:
 ```bash
 git add defs/{flow}/silver/{modified_assets}
+git add dagster-pipeline/tests/{any_new_test_files}
 ```
 
-3. **Commit** (with detailed message):
+3. **Commit** (with detailed conventional commit message):
 ```bash
 git commit -m "$(cat <<'EOF'
-refactor(silver): {description}
+feat({flow}): {short description}
 
 - Modified: {files}
 - Reason: {why}
-- Tested: Backfill {date} ({rows} rows, schema preserved)
+- Tested: dg.materialize() with real data ({rows} rows, schema preserved)
+
+Test harness results:
+- Schema: ✅ {num_cols} columns preserved
+- Nulls: ✅ No regressions
+- Row count: ✅ {rows} rows
+- Audit fields: ✅ Present
 
 Follows ARCHITECTURE.md:
-- {justification}
+- {layer} layer ({justification})
+- Preserves existing structure
+- Propagates automatically to downstream assets
+
+Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 EOF
 )"
 ```
 
-4. **Present to user**:
+4. **Push branch to origin**:
+```bash
+git push origin {branch_name}
 ```
-✅ Modification Completed and Ready for Merge
+
+5. **Create PR via gh CLI**:
+```bash
+gh pr create \
+  --title "feat({flow}): {short description}" \
+  --body "$(cat <<'EOF'
+## Summary
+
+{Detailed description of what changed and why}
+
+Modified assets:
+- `{file_path}:{line_number}` — {what changed}
+
+## Test Results
+
+Ran test harness with real data (`dg.materialize()`):
+
+```json
+{paste the JSON output from test harness}
+```
+
+**All checks passed:**
+- ✅ Materialization successful
+- ✅ Schema preserved ({num_cols} columns)
+- ✅ No null regressions
+- ✅ Row count: {rows} rows
+- ✅ Audit fields present
+
+## Architecture Compliance
+
+- {layer} layer — {justification per ARCHITECTURE.md}
+- Preserves existing structure (same columns, same types)
+- No breaking changes to downstream consumers
+
+## Impact
+
+Affected assets (downstream propagation):
+- {list of downstream assets}
+
+No migration required — backwards compatible.
+
+---
+
+🤖 Generated with logic_modifier agent
+EOF
+)"
+```
+
+6. **Add labels to PR**:
+```bash
+gh pr edit {pr_number} --add-label "agent/proposer,iteration/1,{flow}-flow"
+```
+
+7. **Report to user**:
+```
+✅ PR Created Successfully
 
 Column(s): {columns}
 Table: {gold_table}
@@ -589,58 +635,63 @@ Changes:
 - {change description 2}
 
 Testing:
-- Backfill: {date} partition ({rows} rows)
-- Schema: Preserved ({num_cols} columns)
-- Row count: {rows} rows (diff {diff}%)
-- Null count: {nulls} nulls in modified column
+- Test harness: ✅ PASSED
+- Schema: ✅ Preserved ({num_cols} columns)
+- Row count: ✅ {rows} rows
+- Nulls: ✅ No regressions
 
+Pull Request: {pr_url}
 Branch: {branch_name}
 Commit: {commit_hash_short}
 
-Do you want to merge to main?
+Next steps:
+- The test specialist will validate this PR against real data
+- The reviewer agent will check architecture compliance
+- Human approval required for final merge
+
+Worktree will be auto-cleaned by the system.
 ```
 
-**Wait for user confirmation** before merging.
+**IMPORTANT**: Do NOT wait for user confirmation to create the PR. The PR is the deliverable.
 
-#### 8.2. If User Confirms → Merge
+#### 8.2. If Tests Failed After 3 Attempts → Report Impossibility
 
-```bash
-# Push branch
-git push origin {branch_name}
-
-# Merge (or create PR if workflow requires review)
-git checkout main
-git merge {branch_name}
-git push origin main
-```
-
-#### 8.3. If Impossible → Rollback
-
-**DO NOT cleanup worktree** - system does it automatically.
+**DO NOT create a PR if tests never passed.**
 
 **Report**:
 ```
-❌ Modification Impossible
+❌ Modification Not Possible
 
 Column(s): {columns}
 Table: {gold_table}
 
 Reason:
-{detailed problem description}
+{detailed problem description from test harness failures}
 
-Attempts made: {number}
-Root cause: {root_cause}
+Attempts made: 3 (max limit reached)
+Root cause: {root_cause from error analysis}
+
+Test harness errors:
+{paste the JSON error output}
 
 Recommendation:
-{suggestion on what to do}
+{suggestion: redesign approach? need different data source? fundamental limitation?}
 
-Status: Changes not applied (worktree will be cleaned automatically)
+Status: Changes not applied. Worktree will be cleaned automatically.
 ```
 
+#### 8.3. Worktree Cleanup
+
+**DO NOT manually clean the worktree** — the system does it automatically after Phase 8 completes.
+
+The worktree is cleaned in these cases:
+- ✅ PR created successfully (branch pushed to origin)
+- ❌ Tests failed after 3 attempts (no PR created, no changes pushed)
+
 **Output**:
-- ✅ Merge completed (if user confirms) + success report
-- ❌ Rollback (if impossible) + failure report
-- ⏸️ Branch ready for merge (if user wants to review manually)
+- ✅ PR created + labeled + reported to user (if tests passed)
+- ❌ Impossibility report (if tests failed after 3 attempts)
+- Worktree auto-cleaned in both cases
 
 ---
 

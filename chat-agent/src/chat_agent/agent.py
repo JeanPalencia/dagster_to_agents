@@ -156,6 +156,7 @@ async def run_agent(user_message: str, session_id: str | None = None) -> tuple[s
             "AWS_SESSION_TOKEN": os.environ.get("AWS_SESSION_TOKEN", ""),
             "ENGRAM_DATA_DIR": os.environ.get("ENGRAM_DATA_DIR", "/data/.engram"),
             "SPOT2_API_KEY": os.environ.get("SPOT2_API_KEY", ""),
+            "GITHUB_TOKEN": os.environ.get("GITHUB_TOKEN", ""),  # For gh CLI (PR creation)
             # Ensure engram binary (/usr/local/bin) and venv are on PATH for the CLI subprocess
             "PATH": "/usr/local/bin:/app/.venv/bin:" + os.environ.get("PATH", ""),
         },

@@ -32,6 +32,7 @@ dependencies = [
 dev = [
     "dagster-webserver",
     "dagster-dg-cli",
+    "pytest>=8.0",
 ]
 
 [build-system]
