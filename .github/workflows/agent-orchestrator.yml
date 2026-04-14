@@ -1,13 +1,12 @@
 name: Agent Loop Orchestrator
 
 on:
-  push:
-    branches:
-      - "feat/**"
-      - "fix/**"
-      - "refactor/**"
-    paths:
-      - "dagster-pipeline/**"
+  # Triggered by logic_modifier via GitHub API after creating/updating a PR.
+  # repository_dispatch always runs from main — bypasses GitHub anti-loop
+  # protection that blocks pull_request events when same account creates PR.
+  repository_dispatch:
+    types: [agent-pr-created, agent-pr-updated]
+  # Handles PRs from other users/bots
   pull_request:
     types: [opened, synchronize]
     paths:
@@ -36,11 +35,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
-          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+          DISPATCH_PR_NUMBER: ${{ github.event.client_payload.pr_number }}
+          BRANCH_NAME: ${{ github.head_ref || github.event.client_payload.branch || github.ref_name }}
         run: |
           set -e
 
-          if [ -n "$EVENT_PR_NUMBER" ]; then
+          if [ -n "$DISPATCH_PR_NUMBER" ]; then
+            PR_NUMBER="$DISPATCH_PR_NUMBER"
+          elif [ -n "$EVENT_PR_NUMBER" ]; then
             PR_NUMBER="$EVENT_PR_NUMBER"
           else
             PR_NUMBER=$(gh pr list --head "$BRANCH_NAME" --state open --json number --jq '.[0].number' 2>/dev/null || echo "")

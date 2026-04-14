@@ -627,8 +627,19 @@ EOF
 
 6. **Add labels to PR**:
 ```bash
-gh pr edit {pr_number} --add-label "agent/proposer,iteration/1,{flow}-flow"
+gh pr edit {pr_number} --add-label "agent/proposer,iteration/1"
 ```
+
+7. **Trigger GitHub Actions agent loop via repository_dispatch**:
+```bash
+gh api repos/JeanPalencia/dagster_to_agents/dispatches \
+  --method POST \
+  --field event_type=agent-pr-created \
+  --field 'client_payload[pr_number]={pr_number}' \
+  --field 'client_payload[branch]={branch_name}' \
+  --field 'client_payload[flow_name]={flow_name}'
+```
+This triggers the Agent Loop Orchestrator workflow from `main` (not the feature branch), bypassing GitHub's anti-loop protection.
 
 7. **Report to user**:
 ```
