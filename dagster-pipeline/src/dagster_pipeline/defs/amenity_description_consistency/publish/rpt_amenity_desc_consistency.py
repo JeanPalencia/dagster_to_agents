@@ -27,20 +27,28 @@ def rpt_amenity_desc_consistency_to_s3(
     gold_amenity_desc_consistency: pl.DataFrame,
 ) -> str:
     """Writes DataFrame to S3 and returns the S3 key."""
+    # Format adc_mention_rate to always show exactly 3 decimals in CSV
+    df_formatted = gold_amenity_desc_consistency.with_columns(
+        pl.col("adc_mention_rate").map_elements(
+            lambda x: f"{x:.3f}",
+            return_dtype=pl.String
+        )
+    )
+
     write_polars_to_s3(
-        gold_amenity_desc_consistency, S3_KEY, context, file_format=FILE_FORMAT,
+        df_formatted, S3_KEY, context, file_format=FILE_FORMAT,
     )
 
     try:
         context.add_output_metadata({
             "s3_key": S3_KEY,
-            "rows": gold_amenity_desc_consistency.height,
-            "columns": gold_amenity_desc_consistency.width,
+            "rows": df_formatted.height,
+            "columns": df_formatted.width,
             "format": FILE_FORMAT,
         })
     except Exception:
         context.log.info(
-            f"Metadata: s3_key={S3_KEY}, rows={gold_amenity_desc_consistency.height}"
+            f"Metadata: s3_key={S3_KEY}, rows={df_formatted.height}"
         )
 
     return S3_KEY
