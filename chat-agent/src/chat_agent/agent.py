@@ -88,6 +88,14 @@ _REGISTRY: dict[str, dict] = {
         ),
         "internal": False,
     },
+    "test_specialist": {
+        "kind": "subagent",
+        "description": (
+            "Valida cambios de PRs ejecutando flujos contra datos reales (dg.materialize()). "
+            "Diseña assertions específicas al cambio y reporta resultados."
+        ),
+        "internal": True,  # Triggered by GitHub Actions, not user-facing
+    },
 }
 
 # Derived from registry — don't edit manually

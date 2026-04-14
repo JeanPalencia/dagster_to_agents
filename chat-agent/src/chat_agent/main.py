@@ -35,7 +35,7 @@ import os
 import pwd
 
 import httpx
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.service_account import Credentials
@@ -171,6 +171,88 @@ async def debug_engram() -> dict:
         "engram_binary": engram_path,
         "recent_memories": rows,
     }
+
+
+def _verify_agent_secret(request: Request) -> None:
+    """Verify the shared secret for agent-to-agent communication."""
+    auth_header = request.headers.get("Authorization", "")
+    expected_secret = os.environ.get("AGENT_SECRET", "")
+
+    if not expected_secret:
+        logger.warning("AGENT_SECRET not configured - agent endpoints disabled")
+        raise HTTPException(status_code=503, detail="Agent endpoints not configured")
+
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+
+    token = auth_header.split("Bearer ", 1)[1]
+    if token != expected_secret:
+        logger.warning("Invalid AGENT_SECRET provided")
+        raise HTTPException(status_code=403, detail="Invalid secret")
+
+
+@app.post("/agent/test")
+async def agent_test(request: Request) -> JSONResponse:
+    """
+    Test specialist endpoint - validates PR changes against real data.
+
+    Called by GitHub Actions when a PR is opened or synchronized.
+    """
+    _verify_agent_secret(request)
+
+    body: dict = await request.json()
+    pr_number = body.get("pr_number")
+    branch = body.get("branch")
+    flow_name = body.get("flow_name")
+    changed_files = body.get("changed_files", [])
+
+    if not pr_number or not branch or not flow_name:
+        return JSONResponse(
+            {"error": "Missing required fields: pr_number, branch, flow_name"},
+            status_code=400,
+        )
+
+    logger.info("Test request for PR #%s (branch: %s, flow: %s)", pr_number, branch, flow_name)
+
+    # Build prompt for test_specialist
+    prompt = f"""Test PR #{pr_number} for the {flow_name} flow.
+
+Branch: {branch}
+Changed files: {', '.join(changed_files) if changed_files else 'unknown'}
+
+Tasks:
+1. Read the PR diff via gh CLI
+2. Understand what changed
+3. Run the test harness: uv run python -m tests.test_harness --flow={flow_name}
+4. Design flow-specific assertions if needed
+5. Post test results as PR comment
+6. Add label: tests/passed or tests/failed
+
+Use the test_specialist sub-agent (you are already in worktree isolation on the PR branch).
+"""
+
+    # Run test_specialist agent (this will take time - GitHub Actions will poll)
+    try:
+        result_text, _ = await run_agent(prompt, session_id=None)
+        logger.info("Test specialist completed for PR #%s", pr_number)
+
+        return JSONResponse({
+            "status": "completed",
+            "pr_number": pr_number,
+            "message": "Test specialist executed",
+            "result_preview": result_text[:500] if result_text else "No output",
+        })
+
+    except Exception as exc:
+        logger.exception("Error running test specialist: %s", exc)
+        return JSONResponse(
+            {
+                "status": "error",
+                "pr_number": pr_number,
+                "error": str(exc),
+            },
+            status_code=500,
+        )
 
 
 @app.post(
