@@ -354,12 +354,14 @@ async def chat_webhook(request: Request) -> JSONResponse:
         return JSONResponse(_chat_response(reply))
 
     except asyncio.TimeoutError:
-        # Agent is taking too long — respond immediately and continue in background
+        # Agent is taking too long — let the background task send and manage the single message
         logger.info("Agent timeout (%ds) — switching to async response", _SYNC_TIMEOUT)
         asyncio.create_task(
             _run_agent_and_reply(user_text, space_name, session_id)
         )
-        return JSONResponse(_chat_response("⏳ Analizando tu solicitud, te respondo en un momento..."))
+        # Return empty response so Google Chat doesn't create a second message.
+        # _run_agent_and_reply sends its own first message and edits it with progress.
+        return JSONResponse({})
 
     except Exception as exc:
         logger.exception("Agent error: %s", exc)
