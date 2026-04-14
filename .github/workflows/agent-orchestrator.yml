@@ -1,17 +1,23 @@
 name: Agent Loop Orchestrator
 
 on:
+  # Triggers when agent pushes to feature/fix branch (pull_request event
+  # doesn't fire when the same account that owns the repo creates the PR)
+  push:
+    branches:
+      - 'feat/**'
+      - 'fix/**'
+      - 'refactor/**'
+    paths:
+      - 'dagster-pipeline/**'
+  # Also keep pull_request for PRs created by other users/bots
   pull_request:
     types: [opened, synchronize]
-  workflow_dispatch:
-    inputs:
-      pr_number:
-        description: 'PR number to process'
-        required: true
-        type: string
+    paths:
+      - 'dagster-pipeline/**'
 
 concurrency:
-  group: agent-loop-${{ github.event.pull_request.number || inputs.pr_number }}
+  group: agent-loop-${{ github.ref }}
   cancel-in-progress: false  # Never cancel mid-run — agents are stateful
 
 jobs:
@@ -24,6 +30,7 @@ jobs:
       flow_name: ${{ steps.detect.outputs.flow_name }}
       branch: ${{ steps.detect.outputs.branch }}
       iteration: ${{ steps.detect.outputs.iteration }}
+      pr_number: ${{ steps.detect.outputs.pr_number }}
 
     steps:
       - uses: actions/checkout@v4
@@ -34,8 +41,24 @@ jobs:
         id: detect
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
         run: |
+          # Resolve PR number — from pull_request event or by finding open PR for this branch
+          if [ -n "${{ github.event.pull_request.number }}" ]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          else
+            # push trigger: find open PR for this branch
+            BRANCH="${{ github.ref_name }}"
+            PR_NUMBER=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
+            if [ -z "$PR_NUMBER" ]; then
+              echo "No open PR found for branch $BRANCH — skipping agent loop"
+              echo "flow_name=skip" >> $GITHUB_OUTPUT
+              echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+              echo "iteration=0" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          fi
+          echo "PR number: $PR_NUMBER"
+
           # Get changed files in this PR
           CHANGED=$(gh pr diff $PR_NUMBER --name-only 2>/dev/null || git diff --name-only origin/${{ github.base_ref }}...HEAD)
           echo "Changed files: $CHANGED"
@@ -64,7 +87,9 @@ jobs:
 
           echo "Detected flow: $FLOW"
           echo "flow_name=$FLOW" >> $GITHUB_OUTPUT
-          echo "branch=${{ github.head_ref }}" >> $GITHUB_OUTPUT
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          BRANCH="${{ github.head_ref || github.ref_name }}"
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
 
           # Detect current iteration from PR labels
           LABELS=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name' 2>/dev/null || echo "")
@@ -82,7 +107,7 @@ jobs:
   test:
     needs: detect-flow
     runs-on: ubuntu-latest
-    if: needs.detect-flow.outputs.flow_name != 'unknown'
+    if: needs.detect-flow.outputs.flow_name != 'unknown' && needs.detect-flow.outputs.flow_name != 'skip'
     outputs:
       test_status: ${{ steps.check-result.outputs.test_status }}
       test_summary: ${{ steps.check-result.outputs.test_summary }}
@@ -91,7 +116,7 @@ jobs:
       - name: Ensure PR labels exist
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
         run: |
           # Create labels if they don't exist yet
           for LABEL in "tests/passed" "tests/failed" "review/approved" "review/changes-requested" \
@@ -107,7 +132,7 @@ jobs:
       - name: Call test specialist
         id: call-test
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
           FLOW_NAME: ${{ needs.detect-flow.outputs.flow_name }}
           BRANCH: ${{ needs.detect-flow.outputs.branch }}
           AGENT_SECRET: ${{ secrets.AGENT_SECRET }}
@@ -138,7 +163,7 @@ jobs:
         id: check-result
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
         run: |
           # Read the test result from labels set by the test specialist agent
           LABELS=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name')
@@ -172,7 +197,7 @@ jobs:
       - name: Call reviewer
         id: call-review
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
           FLOW_NAME: ${{ needs.detect-flow.outputs.flow_name }}
           TEST_SUMMARY: ${{ needs.test.outputs.test_summary }}
           AGENT_SECRET: ${{ secrets.AGENT_SECRET }}
@@ -197,7 +222,7 @@ jobs:
         id: check-review
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
         run: |
           LABELS=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name')
 
@@ -228,7 +253,7 @@ jobs:
         id: check-limit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
           CURRENT_ITERATION: ${{ needs.detect-flow.outputs.iteration }}
         run: |
           echo "Current iteration: $CURRENT_ITERATION"
@@ -242,7 +267,7 @@ jobs:
         if: steps.check-limit.outputs.limit_reached == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
         run: |
           gh pr edit $PR_NUMBER --add-label "needs-human-intervention"
           gh pr comment $PR_NUMBER --body "## ⚠️ Agent Loop Exhausted
@@ -258,7 +283,7 @@ A human must review this PR manually.
         id: collect-feedback
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
           TEST_STATUS: ${{ needs.test.outputs.test_status }}
           REVIEW_DECISION: ${{ needs.review.outputs.review_decision }}
           CURRENT_ITERATION: ${{ needs.detect-flow.outputs.iteration }}
@@ -279,7 +304,7 @@ A human must review this PR manually.
       - name: Call iterate endpoint
         if: steps.check-limit.outputs.limit_reached == 'false'
         env:
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
           BRANCH: ${{ needs.detect-flow.outputs.branch }}
           FEEDBACK: ${{ steps.collect-feedback.outputs.feedback }}
           NEXT_ITERATION: ${{ steps.collect-feedback.outputs.next_iteration }}
@@ -312,7 +337,7 @@ A human must review this PR manually.
       - name: Post workflow summary
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
           FLOW: ${{ needs.detect-flow.outputs.flow_name }}
           TEST_STATUS: ${{ needs.test.outputs.test_status }}
           REVIEW_DECISION: ${{ needs.review.outputs.review_decision }}
