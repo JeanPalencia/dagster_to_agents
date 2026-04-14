@@ -10,12 +10,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
 # Install mcp-remote globally so npx finds it instantly (no download on each call)
 RUN npm install -g mcp-remote
 
-# Install GitHub CLI (needed for PR creation by agents)
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-    | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-    | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-    && apt-get update && apt-get install -y gh && rm -rf /var/lib/apt/lists/*
+# Install GitHub CLI (needed for PR creation by agents) — binary install, no APT keyring needed
+RUN curl -fsSL https://github.com/cli/cli/releases/download/v2.65.0/gh_2.65.0_linux_amd64.tar.gz \
+    | tar -xz --strip-components=2 -C /usr/local/bin gh_2.65.0_linux_amd64/bin/gh && \
+    chmod 755 /usr/local/bin/gh
 
 # Install Engram binary (Linux x86_64)
 RUN curl -fsSL https://github.com/Gentleman-Programming/engram/releases/download/v1.12.0/engram_1.12.0_linux_amd64.tar.gz \
