@@ -19,6 +19,10 @@ Affects: gold_amenity_desc_consistency, rpt_amenity_desc_consistency (S3 + GeoSp
 MODIFIED 2026-04-13: adc_mention_rate rounding changed from 4 to 2 decimals.
 Reason: Reduce precision to match reporting requirements.
 Affects: gold_amenity_desc_consistency, rpt_amenity_desc_consistency (S3 + GeoSpot).
+
+MODIFIED 2026-04-14: adc_mention_rate rounding changed from 2 to 4 decimals.
+Reason: Increase precision to match production data requirements.
+Affects: gold_amenity_desc_consistency, rpt_amenity_desc_consistency (S3 + GeoSpot).
 """
 import re
 from typing import Callable
@@ -261,7 +265,7 @@ def core_amenity_desc_consistency(
             "adc_total_tagged": total_t,
             "adc_total_mentioned": total_m,
             "adc_total_omitted": total_o,
-            "adc_mention_rate": round(rate, 2),  # Rounded to 2 decimals (changed 2026-04-13 from 4)
+            "adc_mention_rate": round(rate, 4),  # Rounded to 4 decimals (changed 2026-04-14 from 2)
             "adc_category_id": cat_id,
             "adc_category": _CATEGORY_LABELS[cat_id],
         })
