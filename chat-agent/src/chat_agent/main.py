@@ -33,6 +33,7 @@ import asyncio
 import logging
 import os
 import pwd
+from typing import Any
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -93,8 +94,13 @@ def _get_chat_token() -> str:
     return credentials.token
 
 
-async def _send_async_message(space_name: str, text: str) -> None:
-    """Send a proactive message to a Google Chat space via REST API."""
+async def _send_async_message(space_name: str, text: str) -> str | None:
+    """
+    Send a proactive message to a Google Chat space via REST API.
+
+    Returns:
+        message_name (e.g., "spaces/.../messages/...") or None if failed
+    """
     try:
         token = _get_chat_token()
         async with httpx.AsyncClient(timeout=10) as client:
@@ -105,10 +111,45 @@ async def _send_async_message(space_name: str, text: str) -> None:
             )
             if resp.status_code != 200:
                 logger.error("Failed to send async message: %d %s", resp.status_code, resp.text)
+                return None
             else:
-                logger.info("Async message sent to %s", space_name)
+                result = resp.json()
+                message_name = result.get("name")  # "spaces/.../messages/..."
+                logger.info("Async message sent to %s: %s", space_name, message_name)
+                return message_name
     except Exception as exc:
         logger.exception("Error sending async message: %s", exc)
+        return None
+
+
+async def _update_message(message_name: str, new_text: str) -> bool:
+    """
+    Update an existing Google Chat message.
+
+    Args:
+        message_name: Full message name (spaces/.../messages/...)
+        new_text: New text content
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        token = _get_chat_token()
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.patch(
+                f"https://chat.googleapis.com/v1/{message_name}",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"text": new_text},
+                params={"updateMask": "text"},
+            )
+            if resp.status_code != 200:
+                logger.warning("Failed to update message %s: %d %s", message_name, resp.status_code, resp.text)
+                return False
+            logger.debug("Updated message %s", message_name)
+            return True
+    except Exception as exc:
+        logger.warning("Error updating message %s: %s", message_name, exc)
+        return False
 
 
 async def _run_agent_and_reply(
@@ -116,18 +157,42 @@ async def _run_agent_and_reply(
     space_name: str,
     session_id: str | None,
 ) -> None:
-    """Background task: run agent and send result via proactive message."""
+    """Background task: run agent with live progress updates and send result."""
+    from chat_agent.progress_tracker import get_initial_message, infer_status_from_event
+
+    # Send initial progress message
+    initial_msg = get_initial_message()
+    message_name = await _send_async_message(space_name, initial_msg)
+
+    if not message_name:
+        logger.error("Failed to send initial message, cannot track progress")
+        return
+
+    # Progress callback to update the message
+    last_status = initial_msg
+    async def progress_callback(event: Any) -> None:
+        nonlocal last_status
+        new_status = infer_status_from_event(event)
+        if new_status and new_status != last_status:
+            last_status = new_status
+            await _update_message(message_name, new_status)
+
+    # Run agent with progress tracking
     try:
-        reply, new_session_id = await run_agent(user_text, session_id=session_id)
+        reply, new_session_id = await run_agent(
+            user_text,
+            session_id=session_id,
+            progress_callback=progress_callback,
+        )
         if new_session_id and space_name:
             _sessions[space_name] = new_session_id
             logger.info("Stored session %s for space %s", new_session_id, space_name)
     except Exception as exc:
         logger.exception("Agent error in background task: %s", exc)
-        reply = f"Error procesando tu mensaje: {exc}"
+        reply = f"❌ Error procesando tu mensaje: {exc}"
 
-    if space_name:
-        await _send_async_message(space_name, reply)
+    # Update with final result
+    await _update_message(message_name, reply)
 
 
 @app.get("/health")

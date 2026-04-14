@@ -137,9 +137,18 @@ _USER_CAPABILITIES = [
 _SYSTEM_PROMPT = build_system_prompt(_USER_CAPABILITIES)
 
 
-async def run_agent(user_message: str, session_id: str | None = None) -> tuple[str, str | None]:
+async def run_agent(
+    user_message: str,
+    session_id: str | None = None,
+    progress_callback: callable | None = None,
+) -> tuple[str, str | None]:
     """
     Run Claude Agent SDK for a single user message.
+
+    Args:
+        user_message: User's input text
+        session_id: Optional session ID to resume
+        progress_callback: Optional async callback(event) called for each SDK event
 
     Returns:
         (response_text, new_session_id)
@@ -177,6 +186,13 @@ async def run_agent(user_message: str, session_id: str | None = None) -> tuple[s
 
     try:
         async for message in query(prompt=user_message, options=options):
+            # Call progress callback for every event (if provided)
+            if progress_callback:
+                try:
+                    await progress_callback(message)
+                except Exception as cb_exc:
+                    logger.warning("Progress callback error: %s", cb_exc)
+
             if hasattr(message, "session_id") and message.session_id:
                 new_session_id = message.session_id
 
