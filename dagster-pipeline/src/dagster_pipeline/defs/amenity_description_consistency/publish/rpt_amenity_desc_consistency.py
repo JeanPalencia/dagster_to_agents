@@ -3,6 +3,10 @@ Publish layer: Save gold_amenity_desc_consistency to S3 and load into GeoSpot.
 
 - rpt_amenity_desc_consistency_to_s3: Writes CSV to S3
 - rpt_amenity_desc_consistency_to_geospot: Loads to PostgreSQL via GeoSpot API (replace mode)
+
+MODIFIED 2026-04-14: Format adc_mention_rate to 3 fixed decimals before CSV write.
+Reason: Ensure CSV output always shows 3 decimal places (e.g. 1.000, 2.500, 0.123).
+This is an I/O formatting concern (analogous to _convert_lists_to_json for CSV).
 """
 import dagster as dg
 import polars as pl
@@ -27,20 +31,28 @@ def rpt_amenity_desc_consistency_to_s3(
     gold_amenity_desc_consistency: pl.DataFrame,
 ) -> str:
     """Writes DataFrame to S3 and returns the S3 key."""
+    # Format adc_mention_rate to 3 fixed decimals for CSV output
+    # (e.g. 1.0 -> "1.000", 0.5 -> "0.500"). Analogous to _convert_lists_to_json
+    # for CSV format compatibility. Added 2026-04-14.
+    df_out = gold_amenity_desc_consistency.with_columns(
+        pl.col("adc_mention_rate")
+        .map_elements(lambda x: f"{x:.3f}", return_dtype=pl.Utf8)
+        .alias("adc_mention_rate")
+    )
     write_polars_to_s3(
-        gold_amenity_desc_consistency, S3_KEY, context, file_format=FILE_FORMAT,
+        df_out, S3_KEY, context, file_format=FILE_FORMAT,
     )
 
     try:
         context.add_output_metadata({
             "s3_key": S3_KEY,
-            "rows": gold_amenity_desc_consistency.height,
-            "columns": gold_amenity_desc_consistency.width,
+            "rows": df_out.height,
+            "columns": df_out.width,
             "format": FILE_FORMAT,
         })
     except Exception:
         context.log.info(
-            f"Metadata: s3_key={S3_KEY}, rows={gold_amenity_desc_consistency.height}"
+            f"Metadata: s3_key={S3_KEY}, rows={df_out.height}"
         )
 
     return S3_KEY
