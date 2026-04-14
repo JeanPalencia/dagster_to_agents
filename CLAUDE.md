@@ -267,3 +267,63 @@ Este proyecto tiene agentes especializados que se activan automáticamente segú
 **Uso via Google Chat**: enviar un mensaje describiendo el cambio + "Tienes mi confirmación" para que proceda al commit. El agente corre async y notifica via proactive message cuando termina.
 
 **Nota**: el sub-agente opera en `/app/repo/` dentro del container, con git configurado como `Dagster Agent <dagster-agent@railway.app>` para los commits.
+
+---
+
+## Agent Loop — Flujo de cambios via PR
+
+Todo cambio de lógica pasa por este loop automático. **Nunca se hace merge directo a main.**
+
+```
+Usuario (Google Chat)
+  → logic_modifier crea PR en rama feat/{flow}/{desc}
+      → GitHub Actions detecta el PR
+          → /agent/test valida con dg.materialize() contra datos reales
+              → Si pasa: /agent/review revisa arquitectura (12 reglas)
+                  → Si aprueba (HIGH/MEDIUM): humano hace merge
+                  → Si rechaza: /agent/iterate corrige el PR (max 3 veces)
+              → Si falla: /agent/iterate corrige el PR (max 3 veces)
+                  → Después de 3 intentos: label needs-human-intervention
+```
+
+### Endpoints del chat-agent (Railway)
+
+| Endpoint | Autenticación | Qué hace |
+|----------|---------------|----------|
+| `POST /agent/test` | `AGENT_SECRET` | Test specialist: corre test harness con datos reales, postea resultados en PR |
+| `POST /agent/review` | `AGENT_SECRET` | Reviewer: valida arquitectura, postea GitHub review con confidence level |
+| `POST /agent/iterate` | `AGENT_SECRET` | Hace que logic_modifier corrija issues sobre el mismo PR |
+
+### Labels del PR
+
+| Label | Significado |
+|-------|-------------|
+| `agent/proposer` | Creado por logic_modifier |
+| `iteration/1`, `/2`, `/3` | Ronda de iteración actual |
+| `tests/passed`, `tests/failed` | Resultado del test specialist |
+| `review/approved`, `review/changes-requested` | Decisión del reviewer |
+| `confidence/high`, `/medium`, `/low` | Nivel de confianza del reviewer |
+| `needs-human-review` | Confianza baja — revisar manualmente |
+| `needs-human-intervention` | 3 iteraciones agotadas |
+
+### Agentes del loop
+
+| Agente | Modelo | Archivo | Disparado por |
+|--------|--------|---------|---------------|
+| `logic_modifier` | opus | `.claude/agents/logic_modifier.md` | Usuario via Google Chat |
+| `test_specialist` | sonnet | `.claude/agents/test_specialist.md` | GitHub Actions → `/agent/test` |
+| `reviewer` | opus | `.claude/agents/reviewer.md` | GitHub Actions → `/agent/review` |
+
+### Variables de entorno requeridas en Railway (dagster-chat2)
+
+| Variable | Propósito |
+|----------|-----------|
+| `GITHUB_TOKEN` | PAT para git clone al startup + gh CLI (Contents + PR + Workflows: R&W) |
+| `AGENT_SECRET` | Shared secret para autenticar endpoints `/agent/*` desde GitHub Actions |
+
+### Secrets requeridos en GitHub (Settings → Secrets → Actions)
+
+| Secret | Valor |
+|--------|-------|
+| `AGENT_SECRET` | Mismo valor que Railway `AGENT_SECRET` |
+| `CHAT_AGENT_URL` | `https://dagster-chat2-production.up.railway.app` |
