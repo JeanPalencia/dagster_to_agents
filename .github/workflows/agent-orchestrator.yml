@@ -1,29 +1,23 @@
 name: Agent Loop Orchestrator
 
 on:
-  # Triggers when agent pushes to feature/fix branch (pull_request event
-  # doesn't fire when the same account that owns the repo creates the PR)
   push:
     branches:
-      - 'feat/**'
-      - 'fix/**'
-      - 'refactor/**'
+      - "feat/**"
+      - "fix/**"
+      - "refactor/**"
     paths:
-      - 'dagster-pipeline/**'
-  # Also keep pull_request for PRs created by other users/bots
+      - "dagster-pipeline/**"
   pull_request:
     types: [opened, synchronize]
     paths:
-      - 'dagster-pipeline/**'
+      - "dagster-pipeline/**"
 
 concurrency:
-  group: agent-loop-${{ github.ref }}
-  cancel-in-progress: false  # Never cancel mid-run — agents are stateful
+  group: "agent-loop-${{ github.ref }}"
+  cancel-in-progress: false
 
 jobs:
-  # ──────────────────────────────────────────────────────────────────────────
-  # JOB 1: Detect which flow was changed
-  # ──────────────────────────────────────────────────────────────────────────
   detect-flow:
     runs-on: ubuntu-latest
     outputs:
@@ -37,41 +31,41 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Detect flow name and iteration
+      - name: Detect flow and PR number
         id: detect
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
         run: |
-          # Resolve PR number — from pull_request event or by finding open PR for this branch
-          if [ -n "${{ github.event.pull_request.number }}" ]; then
-            PR_NUMBER="${{ github.event.pull_request.number }}"
+          set -e
+
+          if [ -n "$EVENT_PR_NUMBER" ]; then
+            PR_NUMBER="$EVENT_PR_NUMBER"
           else
-            # push trigger: find open PR for this branch
-            BRANCH="${{ github.ref_name }}"
-            PR_NUMBER=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
-            if [ -z "$PR_NUMBER" ]; then
-              echo "No open PR found for branch $BRANCH — skipping agent loop"
-              echo "flow_name=skip" >> $GITHUB_OUTPUT
-              echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-              echo "iteration=0" >> $GITHUB_OUTPUT
-              exit 0
-            fi
+            PR_NUMBER=$(gh pr list --head "$BRANCH_NAME" --state open --json number --jq '.[0].number' 2>/dev/null || echo "")
           fi
-          echo "PR number: $PR_NUMBER"
 
-          # Get changed files in this PR
-          CHANGED=$(gh pr diff $PR_NUMBER --name-only 2>/dev/null || git diff --name-only origin/${{ github.base_ref }}...HEAD)
-          echo "Changed files: $CHANGED"
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No open PR found for branch $BRANCH_NAME"
+            echo "flow_name=skip" >> "$GITHUB_OUTPUT"
+            echo "branch=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
+            echo "iteration=0" >> "$GITHUB_OUTPUT"
+            echo "pr_number=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
-          # Extract flow name from dagster-pipeline/src/dagster_pipeline/defs/{flow}/
+          echo "PR: $PR_NUMBER"
+
+          CHANGED=$(gh pr diff "$PR_NUMBER" --name-only 2>/dev/null || echo "")
+
           FLOW=$(echo "$CHANGED" \
             | grep "dagster-pipeline/src/dagster_pipeline/defs/" \
             | sed 's|dagster-pipeline/src/dagster_pipeline/defs/||' \
             | cut -d'/' -f1 \
-            | grep -v "^$\|data_lakehouse\|maintenance\|observability\|pipeline_asset" \
+            | grep -Ev "^$|data_lakehouse|maintenance|observability|pipeline_asset" \
             | head -1)
 
-          # Fallback: check dagster-pipeline/tests/
           if [ -z "$FLOW" ]; then
             FLOW=$(echo "$CHANGED" \
               | grep "dagster-pipeline/tests/" \
@@ -81,111 +75,86 @@ jobs:
           fi
 
           if [ -z "$FLOW" ]; then
-            echo "WARNING: Could not detect flow from changed files"
             FLOW="unknown"
           fi
 
-          echo "Detected flow: $FLOW"
-          echo "flow_name=$FLOW" >> $GITHUB_OUTPUT
-          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
-          BRANCH="${{ github.head_ref || github.ref_name }}"
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-
-          # Detect current iteration from PR labels
-          LABELS=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name' 2>/dev/null || echo "")
+          LABELS=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name' 2>/dev/null || echo "")
           ITERATION=1
           if echo "$LABELS" | grep -q "iteration/3"; then
             ITERATION=3
           elif echo "$LABELS" | grep -q "iteration/2"; then
             ITERATION=2
           fi
-          echo "iteration=$ITERATION" >> $GITHUB_OUTPUT
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # JOB 2: Run test specialist
-  # ──────────────────────────────────────────────────────────────────────────
+          echo "flow_name=$FLOW" >> "$GITHUB_OUTPUT"
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "branch=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
+          echo "iteration=$ITERATION" >> "$GITHUB_OUTPUT"
+
   test:
     needs: detect-flow
     runs-on: ubuntu-latest
-    if: needs.detect-flow.outputs.flow_name != 'unknown' && needs.detect-flow.outputs.flow_name != 'skip'
+    if: |
+      needs.detect-flow.outputs.flow_name != 'unknown' &&
+      needs.detect-flow.outputs.flow_name != 'skip' &&
+      needs.detect-flow.outputs.pr_number != ''
     outputs:
       test_status: ${{ steps.check-result.outputs.test_status }}
       test_summary: ${{ steps.check-result.outputs.test_summary }}
 
     steps:
-      - name: Ensure PR labels exist
+      - name: Ensure labels exist and reset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
         run: |
-          # Create labels if they don't exist yet
-          for LABEL in "tests/passed" "tests/failed" "review/approved" "review/changes-requested" \
-                       "confidence/high" "confidence/medium" "confidence/low" \
-                       "iteration/1" "iteration/2" "iteration/3" "needs-human-intervention"; do
-            gh label create "$LABEL" --color "0075ca" 2>/dev/null || true
+          LABELS="tests/passed tests/failed review/approved review/changes-requested confidence/high confidence/medium confidence/low iteration/1 iteration/2 iteration/3 needs-human-intervention"
+          for L in $LABELS; do
+            gh label create "$L" --color "0075ca" 2>/dev/null || true
           done
-
-          # Remove any previous test labels
-          gh pr edit $PR_NUMBER --remove-label "tests/passed" 2>/dev/null || true
-          gh pr edit $PR_NUMBER --remove-label "tests/failed" 2>/dev/null || true
+          gh pr edit "$PR_NUMBER" --remove-label "tests/passed" 2>/dev/null || true
+          gh pr edit "$PR_NUMBER" --remove-label "tests/failed" 2>/dev/null || true
 
       - name: Call test specialist
-        id: call-test
         env:
           PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
           FLOW_NAME: ${{ needs.detect-flow.outputs.flow_name }}
           BRANCH: ${{ needs.detect-flow.outputs.branch }}
           AGENT_SECRET: ${{ secrets.AGENT_SECRET }}
           CHAT_AGENT_URL: ${{ secrets.CHAT_AGENT_URL }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Get changed files for the test specialist
-          CHANGED_FILES=$(gh pr diff $PR_NUMBER --name-only 2>/dev/null | head -20 | tr '\n' ',' | sed 's/,$//')
+          CHANGED_FILES=$(gh pr diff "$PR_NUMBER" --name-only 2>/dev/null | head -20 | tr '\n' ',' | sed 's/,$//')
 
-          echo "Calling test specialist for PR #$PR_NUMBER, flow: $FLOW_NAME"
+          echo "Calling /agent/test for PR #$PR_NUMBER flow=$FLOW_NAME"
 
           RESPONSE=$(curl -sf \
             -X POST "$CHAT_AGENT_URL/agent/test" \
             -H "Authorization: Bearer $AGENT_SECRET" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"pr_number\": $PR_NUMBER,
-              \"branch\": \"$BRANCH\",
-              \"flow_name\": \"$FLOW_NAME\",
-              \"changed_files\": [\"$CHANGED_FILES\"]
-            }" \
-            --max-time 900)  # 15 min timeout
+            -d "{\"pr_number\": $PR_NUMBER, \"branch\": \"$BRANCH\", \"flow_name\": \"$FLOW_NAME\", \"changed_files\": [\"$CHANGED_FILES\"]}" \
+            --max-time 900 || echo '{"status":"error"}')
 
           echo "Response: $RESPONSE"
-          STATUS=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','error'))" 2>/dev/null || echo "error")
-          echo "agent_status=$STATUS" >> $GITHUB_OUTPUT
 
-      - name: Check test result from PR labels
+      - name: Read test result from PR labels
         id: check-result
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
         run: |
-          # Read the test result from labels set by the test specialist agent
-          LABELS=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name')
-          echo "PR Labels: $LABELS"
-
+          LABELS=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')
           if echo "$LABELS" | grep -q "tests/passed"; then
-            echo "test_status=passed" >> $GITHUB_OUTPUT
-            echo "test_summary=Tests passed" >> $GITHUB_OUTPUT
+            echo "test_status=passed" >> "$GITHUB_OUTPUT"
+            echo "test_summary=Tests passed" >> "$GITHUB_OUTPUT"
           elif echo "$LABELS" | grep -q "tests/failed"; then
-            echo "test_status=failed" >> $GITHUB_OUTPUT
-            # Get summary from last comment
-            SUMMARY=$(gh pr view $PR_NUMBER --json comments \
-              --jq '.comments[-1].body' 2>/dev/null | head -20 || echo "Tests failed")
-            echo "test_summary=$SUMMARY" >> $GITHUB_OUTPUT
+            echo "test_status=failed" >> "$GITHUB_OUTPUT"
+            echo "test_summary=Tests failed" >> "$GITHUB_OUTPUT"
           else
-            echo "test_status=unknown" >> $GITHUB_OUTPUT
-            echo "test_summary=Test result unknown — check PR comments" >> $GITHUB_OUTPUT
+            echo "test_status=unknown" >> "$GITHUB_OUTPUT"
+            echo "test_summary=Test result unknown" >> "$GITHUB_OUTPUT"
           fi
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # JOB 3: Run reviewer (only if tests passed)
-  # ──────────────────────────────────────────────────────────────────────────
   review:
     needs: [detect-flow, test]
     runs-on: ubuntu-latest
@@ -195,7 +164,6 @@ jobs:
 
     steps:
       - name: Call reviewer
-        id: call-review
         env:
           PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
           FLOW_NAME: ${{ needs.detect-flow.outputs.flow_name }}
@@ -203,46 +171,37 @@ jobs:
           AGENT_SECRET: ${{ secrets.AGENT_SECRET }}
           CHAT_AGENT_URL: ${{ secrets.CHAT_AGENT_URL }}
         run: |
-          echo "Calling reviewer for PR #$PR_NUMBER, flow: $FLOW_NAME"
+          echo "Calling /agent/review for PR #$PR_NUMBER flow=$FLOW_NAME"
 
-          RESPONSE=$(curl -sf \
+          curl -sf \
             -X POST "$CHAT_AGENT_URL/agent/review" \
             -H "Authorization: Bearer $AGENT_SECRET" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"pr_number\": $PR_NUMBER,
-              \"flow_name\": \"$FLOW_NAME\",
-              \"test_results\": \"$TEST_SUMMARY\"
-            }" \
-            --max-time 600)  # 10 min timeout
+            -d "{\"pr_number\": $PR_NUMBER, \"flow_name\": \"$FLOW_NAME\", \"test_results\": \"$TEST_SUMMARY\"}" \
+            --max-time 600 || echo "Reviewer call failed"
 
-          echo "Response: $RESPONSE"
-
-      - name: Check review decision from PR labels
+      - name: Read review decision from PR labels
         id: check-review
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
         run: |
-          LABELS=$(gh pr view $PR_NUMBER --json labels --jq '.labels[].name')
-
+          LABELS=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')
           if echo "$LABELS" | grep -q "review/approved"; then
-            echo "review_decision=approved" >> $GITHUB_OUTPUT
+            echo "review_decision=approved" >> "$GITHUB_OUTPUT"
           elif echo "$LABELS" | grep -q "review/changes-requested"; then
-            echo "review_decision=changes-requested" >> $GITHUB_OUTPUT
+            echo "review_decision=changes-requested" >> "$GITHUB_OUTPUT"
           else
-            echo "review_decision=unknown" >> $GITHUB_OUTPUT
+            echo "review_decision=unknown" >> "$GITHUB_OUTPUT"
           fi
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # JOB 4: Iterate (if tests failed OR reviewer rejected)
-  # ──────────────────────────────────────────────────────────────────────────
   iterate:
     needs: [detect-flow, test, review]
     runs-on: ubuntu-latest
     if: |
       always() &&
       needs.detect-flow.result == 'success' &&
+      needs.detect-flow.outputs.pr_number != '' &&
       (
         needs.test.outputs.test_status == 'failed' ||
         needs.review.outputs.review_decision == 'changes-requested'
@@ -256,98 +215,51 @@ jobs:
           PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
           CURRENT_ITERATION: ${{ needs.detect-flow.outputs.iteration }}
         run: |
-          echo "Current iteration: $CURRENT_ITERATION"
           if [ "$CURRENT_ITERATION" -ge 3 ]; then
-            echo "limit_reached=true" >> $GITHUB_OUTPUT
+            gh pr edit "$PR_NUMBER" --add-label "needs-human-intervention"
+            gh pr comment "$PR_NUMBER" --body "## Agent Loop Exhausted
+
+3 iterations reached. A human must review this PR manually.
+
+Last test status: ${{ needs.test.outputs.test_status }}
+Last review decision: ${{ needs.review.outputs.review_decision }}"
+            echo "limit_reached=true" >> "$GITHUB_OUTPUT"
           else
-            echo "limit_reached=false" >> $GITHUB_OUTPUT
+            echo "limit_reached=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Escalate to human (limit reached)
-        if: steps.check-limit.outputs.limit_reached == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
-        run: |
-          gh pr edit $PR_NUMBER --add-label "needs-human-intervention"
-          gh pr comment $PR_NUMBER --body "## ⚠️ Agent Loop Exhausted
-
-3 iterations reached without passing tests and review.
-A human must review this PR manually.
-
-**Last test status:** ${{ needs.test.outputs.test_status }}
-**Last review decision:** ${{ needs.review.outputs.review_decision }}"
-
-      - name: Collect feedback for iteration
-        if: steps.check-limit.outputs.limit_reached == 'false'
-        id: collect-feedback
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
-          TEST_STATUS: ${{ needs.test.outputs.test_status }}
-          REVIEW_DECISION: ${{ needs.review.outputs.review_decision }}
-          CURRENT_ITERATION: ${{ needs.detect-flow.outputs.iteration }}
-        run: |
-          # Get feedback from last PR comment
-          FEEDBACK=$(gh pr view $PR_NUMBER --json comments \
-            --jq '.comments[-1].body' 2>/dev/null | head -50 || echo "Fix the issues found in the previous attempt.")
-
-          NEXT_ITERATION=$((CURRENT_ITERATION + 1))
-
-          # Update iteration labels
-          gh pr edit $PR_NUMBER --remove-label "iteration/$CURRENT_ITERATION" 2>/dev/null || true
-          gh pr edit $PR_NUMBER --add-label "iteration/$NEXT_ITERATION" 2>/dev/null || true
-
-          echo "feedback=$FEEDBACK" >> $GITHUB_OUTPUT
-          echo "next_iteration=$NEXT_ITERATION" >> $GITHUB_OUTPUT
-
-      - name: Call iterate endpoint
+      - name: Iterate
         if: steps.check-limit.outputs.limit_reached == 'false'
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
           BRANCH: ${{ needs.detect-flow.outputs.branch }}
-          FEEDBACK: ${{ steps.collect-feedback.outputs.feedback }}
-          NEXT_ITERATION: ${{ steps.collect-feedback.outputs.next_iteration }}
+          CURRENT_ITERATION: ${{ needs.detect-flow.outputs.iteration }}
           AGENT_SECRET: ${{ secrets.AGENT_SECRET }}
           CHAT_AGENT_URL: ${{ secrets.CHAT_AGENT_URL }}
         run: |
-          echo "Calling iterate for PR #$PR_NUMBER (iteration $NEXT_ITERATION)"
+          NEXT=$((CURRENT_ITERATION + 1))
+          FEEDBACK=$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[-1].body' 2>/dev/null | head -50 || echo "Fix the issues found.")
+
+          gh pr edit "$PR_NUMBER" --remove-label "iteration/$CURRENT_ITERATION" 2>/dev/null || true
+          gh pr edit "$PR_NUMBER" --add-label "iteration/$NEXT" 2>/dev/null || true
 
           curl -sf \
             -X POST "$CHAT_AGENT_URL/agent/iterate" \
             -H "Authorization: Bearer $AGENT_SECRET" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"pr_number\": $PR_NUMBER,
-              \"branch\": \"$BRANCH\",
-              \"feedback\": \"$FEEDBACK\",
-              \"iteration\": $NEXT_ITERATION
-            }" \
-            --max-time 900  # 15 min timeout
+            -d "{\"pr_number\": $PR_NUMBER, \"branch\": \"$BRANCH\", \"feedback\": \"$FEEDBACK\", \"iteration\": $NEXT}" \
+            --max-time 900 || echo "Iterate call failed"
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # JOB 5: Summary
-  # ──────────────────────────────────────────────────────────────────────────
   summary:
     needs: [detect-flow, test, review, iterate]
     runs-on: ubuntu-latest
     if: always()
-
     steps:
-      - name: Post workflow summary
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
-          FLOW: ${{ needs.detect-flow.outputs.flow_name }}
-          TEST_STATUS: ${{ needs.test.outputs.test_status }}
-          REVIEW_DECISION: ${{ needs.review.outputs.review_decision }}
+      - name: Workflow summary
         run: |
-          echo "## Agent Loop Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Step | Result |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Flow detected | \`$FLOW\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Tests | $TEST_STATUS |" >> $GITHUB_STEP_SUMMARY
-          echo "| Review | $REVIEW_DECISION |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "PR: https://github.com/${{ github.repository }}/pull/$PR_NUMBER" >> $GITHUB_STEP_SUMMARY
+          echo "## Agent Loop" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Flow: ${{ needs.detect-flow.outputs.flow_name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- PR: ${{ needs.detect-flow.outputs.pr_number }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Tests: ${{ needs.test.outputs.test_status }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Review: ${{ needs.review.outputs.review_decision }}" >> "$GITHUB_STEP_SUMMARY"
