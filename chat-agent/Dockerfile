@@ -36,19 +36,26 @@ WORKDIR /app
 # Copy chat-agent source
 COPY . .
 
-# Clone full repo so logic_modifier can commit and push changes
 ARG GITHUB_REPO=JeanPalencia/dagster_to_agents
-ARG GITHUB_BRANCH=main
-ARG GITHUB_TOKEN
-RUN git clone --depth 1 \
-      https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git /app/repo && \
-    git -C /app/repo config user.email "dagster-agent@railway.app" && \
-    git -C /app/repo config user.name "Dagster Agent"
 RUN uv sync && chown -R appuser:appuser /app
 
 ENV PATH="/app/.venv/bin:$PATH"
+ENV GITHUB_REPO=${GITHUB_REPO}
 
 EXPOSE 8000
 
-# Run as root briefly to fix Volume permissions, then drop to appuser
-CMD ["sh", "-c", "mkdir -p /data/.engram && chown -R appuser:appuser /data && exec gosu appuser uvicorn chat_agent.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Run as root briefly to:
+#   1. Fix Volume permissions
+#   2. Clone repo using GITHUB_TOKEN (runtime env var — works for both clone and gh CLI)
+#   3. Drop to appuser via gosu
+CMD ["sh", "-c", "\
+  mkdir -p /data/.engram && chown -R appuser:appuser /data && \
+  if [ -n \"$GITHUB_TOKEN\" ]; then \
+    git clone --depth 1 https://${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git /app/repo 2>&1 && \
+    git -C /app/repo config user.email 'dagster-agent@railway.app' && \
+    git -C /app/repo config user.name 'Dagster Agent' && \
+    chown -R appuser:appuser /app/repo; \
+  else \
+    echo 'WARNING: GITHUB_TOKEN not set, skipping repo clone'; \
+  fi && \
+  exec gosu appuser uvicorn chat_agent.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
