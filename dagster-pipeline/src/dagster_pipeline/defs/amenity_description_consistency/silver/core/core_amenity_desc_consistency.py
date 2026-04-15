@@ -8,23 +8,8 @@ compiled as regex patterns. Classifies each spot into:
   - Omision parcial:   description covers some but not all
   - Omision total:     description covers none of the tagged amenities
 
-MODIFIED 2026-04-12: adc_mention_rate rounding changed from 4 to 2 decimals.
-Reason: Reduce precision to match reporting requirements.
-Affects: gold_amenity_desc_consistency, rpt_amenity_desc_consistency (S3 + GeoSpot).
-
-MODIFIED 2026-04-13: adc_mention_rate rounding changed from 3 to 4 decimals.
-Reason: Increase precision per user request.
-Affects: gold_amenity_desc_consistency, rpt_amenity_desc_consistency (S3 + GeoSpot).
-
-MODIFIED 2026-04-13: adc_mention_rate rounding changed from 4 to 2 decimals.
-Reason: Reduce precision to match reporting requirements.
-Affects: gold_amenity_desc_consistency, rpt_amenity_desc_consistency (S3 + GeoSpot).
-
-MODIFIED 2026-04-14: adc_mention_rate changed from Float64 (round 2) to String with 4
-guaranteed decimal places (f-string formatting). Trailing zeros are preserved so that
-values like 1.0 render as "1.0000" in CSV and PostgreSQL (VARCHAR).
-Reason: Guarantee trailing zeros in downstream outputs.
-Affects: gold_amenity_desc_consistency, rpt_amenity_desc_consistency (S3 + GeoSpot).
+adc_mention_rate is formatted as a String with 4 guaranteed decimal places
+(e.g. 1.0 -> "1.0000", 0.5 -> "0.5000") to preserve trailing zeros in CSV and GeoSpot.
 """
 import re
 from typing import Callable
