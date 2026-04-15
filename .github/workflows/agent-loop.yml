@@ -28,6 +28,7 @@ jobs:
         id: detect
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
           DISPATCH_PR_NUMBER: ${{ github.event.client_payload.pr_number }}
           DISPATCH_BRANCH: ${{ github.event.client_payload.branch }}
@@ -80,6 +81,7 @@ jobs:
       - name: Reset test labels
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
         run: |
           for L in tests/passed tests/failed; do
@@ -93,6 +95,7 @@ jobs:
           AGENT_SECRET: ${{ secrets.AGENT_SECRET }}
           CHAT_AGENT_URL: ${{ secrets.CHAT_AGENT_URL }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           CHANGED_FILES=$(gh pr diff "$PR_NUMBER" --name-only 2>/dev/null | head -20 | tr '\n' ',' | sed 's/,$//')
           echo "Calling /agent/test PR#$PR_NUMBER flow=$FLOW_NAME"
@@ -105,6 +108,7 @@ jobs:
         id: result
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
         run: |
           LABELS=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')
@@ -141,6 +145,7 @@ jobs:
         id: result
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
         run: |
           LABELS=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')
@@ -162,6 +167,7 @@ jobs:
       - name: Check limit and iterate
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ needs.detect-flow.outputs.pr_number }}
           BRANCH: ${{ needs.detect-flow.outputs.branch }}
           CURRENT_ITERATION: ${{ needs.detect-flow.outputs.iteration }}
