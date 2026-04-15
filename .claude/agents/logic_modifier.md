@@ -398,22 +398,21 @@ def _transform_s2p_client_segments(df: pl.DataFrame) -> pl.DataFrame:
 
 #### 6.2. Document Changes (MANDATORY)
 
-**A. Docstrings** (update):
+**A. Docstrings** — describe WHAT the function does, NOT the change history:
 ```python
 def stg_s2p_clients_new(context):
     """
     Silver STG: Full transformation of raw_s2p_clients_new.
-    
-    MODIFIED {date}: {short description of change}
-    Reason: {why the change was made}
-    Affects: {affected downstream assets}
+    Normalizes types and calculates adc_mention_rate to 3 decimal places.
     """
 ```
 
-**B. Inline comments** (explain new logic):
+**DO NOT add MODIFIED/Added/date annotations in docstrings or inline comments.**
+Git history is the authoritative changelog — code comments are for explaining logic, not tracking who changed what when.
+
+**B. Inline comments** — only when logic is non-obvious:
 ```python
-# {Explanation of new logic - why it was done this way}
-# Added {date}: {description}
+# Round to 3 decimals and format as string to preserve trailing zeros in CSV/GeoSpot
 nueva_expresion = pl.when(...).then(...)
 ```
 
